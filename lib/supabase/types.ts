@@ -21,6 +21,9 @@ export interface Database {
           role: UserRole;
           department_id: string | null;
           points: number;
+          home_lat: number | null;
+          home_lng: number | null;
+          notify_radius_m: number;
           created_at: string;
         };
         Insert: {
@@ -29,6 +32,9 @@ export interface Database {
           role?: UserRole;
           department_id?: string | null;
           points?: number;
+          home_lat?: number | null;
+          home_lng?: number | null;
+          notify_radius_m?: number;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
@@ -186,6 +192,41 @@ export interface Database {
           {
             foreignKeyName: "issue_status_history_changed_by_fkey";
             columns: ["changed_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      issue_notifications: {
+        Row: {
+          id: string;
+          issue_id: string;
+          recipient_id: string;
+          created_at: string;
+          read_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          issue_id: string;
+          recipient_id: string;
+          created_at?: string;
+          read_at?: string | null;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["issue_notifications"]["Insert"]
+        >;
+        Relationships: [
+          {
+            foreignKeyName: "issue_notifications_issue_id_fkey";
+            columns: ["issue_id"];
+            isOneToOne: false;
+            referencedRelation: "issues";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "issue_notifications_recipient_id_fkey";
+            columns: ["recipient_id"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["id"];

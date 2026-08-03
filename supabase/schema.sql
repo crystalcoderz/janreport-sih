@@ -33,6 +33,17 @@ create table profiles (
   role user_role not null default 'citizen',
   department_id uuid references departments (id),
   points integer not null default 0,
+  -- Geofencing: where to center "alert me about nearby issues" checks, and
+  -- how far out. Null home_lat/home_lng means the resident hasn't opted in.
+  home_lat double precision,
+  home_lng double precision,
+  home_location geography(point, 4326) generated always as (
+    case
+      when home_lat is null or home_lng is null then null
+      else st_setsrid(st_makepoint(home_lng, home_lat), 4326)::geography
+    end
+  ) stored,
+  notify_radius_m integer not null default 100 check (notify_radius_m between 25 and 5000),
   created_at timestamptz not null default now()
 );
 
@@ -78,6 +89,18 @@ create table issue_status_history (
   changed_at timestamptz not null default now()
 );
 
+-- Geofenced alerts: one row per (issue, nearby resident) fan-out, created
+-- by the trigger below. Citizens read/mark-read their own rows only;
+-- inserts only ever happen server-side via the security-definer trigger.
+create table issue_notifications (
+  id uuid primary key default gen_random_uuid(),
+  issue_id uuid not null references issues (id) on delete cascade,
+  recipient_id uuid not null references profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  unique (issue_id, recipient_id)
+);
+
 -- ---------------------------------------------------------------------
 -- Indexes
 -- ---------------------------------------------------------------------
@@ -88,6 +111,10 @@ create index issues_status_idx on issues (status);
 create index issues_ai_category_idx on issues (ai_category);
 create index issues_created_at_idx on issues (created_at desc);
 create index issue_status_history_issue_id_idx on issue_status_history (issue_id);
+create index profiles_home_location_gix on profiles using gist (home_location)
+  where home_location is not null;
+create index issue_notifications_recipient_id_idx
+  on issue_notifications (recipient_id, created_at desc);
 
 -- ---------------------------------------------------------------------
 -- Functions & triggers
@@ -233,6 +260,72 @@ as $$
   order by created_at desc;
 $$;
 
+-- Geofencing: categories where one report signals a hazard/disruption for
+-- the whole surrounding area (a water outage, not just a single pothole),
+-- so they're worth pushing to nearby residents who never saw the report.
+-- Must stay in sync with AREA_ALERT_CATEGORIES in lib/departments.ts.
+create function area_alert_categories()
+returns text[]
+language sql
+immutable
+as $$
+  select array[
+    'water_supply',
+    'drainage_sewage',
+    'electricity_outage',
+    'pollution'
+  ];
+$$;
+
+-- Fans out a row per nearby opted-in resident whenever an area-alert-worthy
+-- issue is reported, so the geofenced "water shortage nearby, be aware"
+-- notification (see lib/hooks/use-issue-notifications.ts) has something to
+-- subscribe to. SECURITY DEFINER because inserting on another citizen's
+-- behalf would otherwise be blocked by issue_notifications' own RLS.
+create function notify_nearby_residents()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.ai_category = any(area_alert_categories()) then
+    insert into issue_notifications (issue_id, recipient_id)
+    select new.id, p.id
+    from profiles p
+    where p.home_location is not null
+      and p.id <> new.reporter_id
+      and st_dwithin(p.home_location, new.location, p.notify_radius_m)
+    on conflict (issue_id, recipient_id) do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger issues_notify_nearby_residents
+  after insert on issues
+  for each row execute function notify_nearby_residents();
+
+-- Recipients may only toggle read_at on their own notifications, never
+-- reassign a row to themselves or point it at a different issue.
+create function prevent_issue_notification_tamper()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.issue_id := old.issue_id;
+  new.recipient_id := old.recipient_id;
+  new.created_at := old.created_at;
+  return new;
+end;
+$$;
+
+create trigger issue_notifications_guard_columns
+  before update on issue_notifications
+  for each row execute function prevent_issue_notification_tamper();
+
 -- ---------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------
@@ -242,6 +335,7 @@ alter table departments enable row level security;
 alter table issues enable row level security;
 alter table issue_upvotes enable row level security;
 alter table issue_status_history enable row level security;
+alter table issue_notifications enable row level security;
 
 -- profiles: any signed-in user can read profiles (names/roles are not
 -- sensitive here); users may only edit their own row, and privileged
@@ -300,11 +394,24 @@ create policy "issue_status_history_insert_officer_admin" on issue_status_histor
     )
   );
 
+-- issue_notifications: recipients can read and mark-read their own
+-- geofenced alerts. No insert/delete policy for authenticated users —
+-- rows are only ever created by the security-definer trigger above.
+create policy "issue_notifications_select_own" on issue_notifications
+  for select to authenticated using (recipient_id = auth.uid());
+
+create policy "issue_notifications_update_own" on issue_notifications
+  for update to authenticated
+  using (recipient_id = auth.uid())
+  with check (recipient_id = auth.uid());
+
 -- ---------------------------------------------------------------------
--- Realtime: let the officer dashboard subscribe to live issue changes.
+-- Realtime: let the officer dashboard subscribe to live issue changes,
+-- and citizens subscribe to their own geofenced alerts.
 -- ---------------------------------------------------------------------
 
 alter publication supabase_realtime add table issues;
+alter publication supabase_realtime add table issue_notifications;
 
 -- ---------------------------------------------------------------------
 -- Storage: public bucket for issue photos
