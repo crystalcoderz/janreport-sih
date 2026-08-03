@@ -10,6 +10,7 @@ const CITIZEN_LINKS = [
   { href: "/my-reports", label: "My Reports" },
   { href: "/map", label: "Map" },
   { href: "/alerts", label: "Nearby Alerts" },
+  { href: "/volunteer", label: "Volunteer" },
   { href: "/leaderboard", label: "Leaderboard" },
 ];
 

@@ -14,6 +14,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WhatsAppLoginForm } from "@/components/auth/whatsapp-login-form";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -61,39 +63,54 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
-            <Button type="submit" disabled={loading} className="mt-2">
-              {loading ? "Signing in..." : "Sign in"}
-            </Button>
-          </form>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            No account?{" "}
-            <Link href="/signup" className="underline underline-offset-4">
-              Sign up
-            </Link>
-          </p>
+          <Tabs defaultValue="email">
+            <TabsList className="w-full">
+              <TabsTrigger value="email" className="flex-1">
+                Email
+              </TabsTrigger>
+              <TabsTrigger value="whatsapp" className="flex-1">
+                WhatsApp
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="email" className="mt-4">
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="email"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <Button type="submit" disabled={loading} className="mt-2">
+                  {loading ? "Signing in..." : "Sign in"}
+                </Button>
+              </form>
+              <p className="mt-4 text-center text-sm text-muted-foreground">
+                No account?{" "}
+                <Link href="/signup" className="underline underline-offset-4">
+                  Sign up
+                </Link>
+              </p>
+            </TabsContent>
+            <TabsContent value="whatsapp" className="mt-4">
+              <WhatsAppLoginForm />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>
