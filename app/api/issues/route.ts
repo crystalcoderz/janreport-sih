@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { classifyIssuePhoto } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
+import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 
 export const runtime = "nodejs";
 
@@ -144,6 +145,8 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+
+  await pushNearbyIssueAlerts(issue.id);
 
   return NextResponse.json({ issue }, { status: 201 });
 }

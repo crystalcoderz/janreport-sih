@@ -185,6 +185,23 @@ create table whatsapp_report_sessions (
 );
 
 -- ---------------------------------------------------------------------
+-- Web Push
+-- ---------------------------------------------------------------------
+
+-- One row per browser/device a citizen has enabled push notifications on
+-- (a citizen can have several — phone + laptop, etc). Sent to by
+-- lib/push/fanout.ts whenever the geofencing trigger above creates
+-- issue_notifications rows, so alerts still arrive with the tab closed.
+create table push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references profiles (id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
 -- Indexes
 -- ---------------------------------------------------------------------
 
@@ -208,6 +225,8 @@ create index volunteer_groups_created_by_idx
   on volunteer_groups (created_by);
 create index whatsapp_otp_codes_phone_idx
   on whatsapp_otp_codes (phone, created_at desc);
+create index push_subscriptions_user_id_idx
+  on push_subscriptions (user_id);
 
 -- ---------------------------------------------------------------------
 -- Functions & triggers
@@ -477,6 +496,7 @@ alter table issue_volunteer_offers enable row level security;
 -- (anon/authenticated) access outright.
 alter table whatsapp_otp_codes enable row level security;
 alter table whatsapp_report_sessions enable row level security;
+alter table push_subscriptions enable row level security;
 
 -- profiles: any signed-in user can read profiles (names/roles are not
 -- sensitive here); users may only edit their own row, and privileged
@@ -606,6 +626,24 @@ create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volu
       where p.id = auth.uid() and p.role in ('officer', 'admin')
     )
   );
+
+-- push_subscriptions: a citizen manages only their own devices. Fan-out
+-- (reading other users' subscriptions to send them a push) always goes
+-- through the service-role client in lib/push/fanout.ts, which bypasses
+-- RLS — no broader select policy is needed here.
+create policy "push_subscriptions_select_own" on push_subscriptions
+  for select to authenticated using (user_id = auth.uid());
+
+create policy "push_subscriptions_insert_own" on push_subscriptions
+  for insert to authenticated with check (user_id = auth.uid());
+
+create policy "push_subscriptions_update_own" on push_subscriptions
+  for update to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+create policy "push_subscriptions_delete_own" on push_subscriptions
+  for delete to authenticated using (user_id = auth.uid());
 
 -- ---------------------------------------------------------------------
 -- Realtime: let the officer dashboard subscribe to live issue changes,
