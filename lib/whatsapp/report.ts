@@ -4,6 +4,7 @@ import { reverseGeocode } from "@/lib/geo";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { getOrCreateProfileByPhone } from "@/lib/whatsapp/profile";
 import { sendWhatsAppText } from "@/lib/whatsapp/client";
+import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 
@@ -144,6 +145,8 @@ export async function finalizeReportIfReady(phone: string): Promise<boolean> {
     await sendWhatsAppText(phone, "Sorry, something went wrong saving your report. Please try again.");
     return true;
   }
+
+  await pushNearbyIssueAlerts(issue.id);
 
   const categoryLabel =
     CATEGORY_LABELS[classification.category as IssueCategory] ?? classification.category;
