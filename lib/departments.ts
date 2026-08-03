@@ -17,6 +17,17 @@ export const ISSUE_CATEGORIES = [
 
 export type IssueCategory = (typeof ISSUE_CATEGORIES)[number];
 
+// Categories where one report signals a hazard/disruption for the whole
+// surrounding area (a water outage, not just a single pothole) — these
+// trigger geofenced "nearby residents, be aware" alerts. Must stay in sync
+// with area_alert_categories() in supabase/schema.sql.
+export const AREA_ALERT_CATEGORIES: readonly IssueCategory[] = [
+  "water_supply",
+  "drainage_sewage",
+  "electricity_outage",
+  "pollution",
+];
+
 export const CATEGORY_LABELS: Record<IssueCategory, string> = {
   pothole: "Pothole",
   road_damage: "Road Damage",

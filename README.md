@@ -72,6 +72,12 @@ manage resolution on a live dashboard, and status flows back to the citizen in r
 5. Watch the citizen's `/my-reports` timeline update live to match.
 6. Show `/map` for the live severity map + heatmap, and `/leaderboard` /
    `/analytics` (admin) for the gamification and city-wide stats differentiators.
+7. Geofenced alerts: on a second citizen account, visit `/alerts` and save the
+   current location as the alert location (radius defaults to 100m). Submit a
+   water/electricity/drainage/pollution report from the first account within
+   that radius — the second account gets a live "reported nearby, be aware"
+   alert via the notification bell (and a browser notification if the tab is
+   backgrounded), without ever visiting the issue.
 
 ## Project structure
 
