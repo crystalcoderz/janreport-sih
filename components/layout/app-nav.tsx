@@ -16,10 +16,12 @@ export function AppNav({
   links,
   fullName,
   roleBadge,
+  notificationBell,
 }: {
   links: NavLink[];
   fullName: string | null;
   roleBadge?: string;
+  notificationBell?: React.ReactNode;
 }) {
   const pathname = usePathname();
 
@@ -54,6 +56,7 @@ export function AppNav({
         </div>
         <div className="flex items-center gap-3">
           {roleBadge && <Badge variant="outline">{roleBadge}</Badge>}
+          {notificationBell}
           <span className="hidden text-sm text-muted-foreground sm:inline">
             {fullName}
           </span>

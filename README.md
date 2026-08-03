@@ -37,6 +37,8 @@ manage resolution on a live dashboard, and status flows back to the citizen in r
    - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Project Settings -> API
    - `SUPABASE_SERVICE_ROLE_KEY` — same page (keep secret, server-only)
    - `ANTHROPIC_API_KEY`
+   - `WHATSAPP_*` — optional, see [WhatsApp integration](#whatsapp-integration-meta-cloud-api)
+     below. Everything else works without these.
 
 6. **Seed demo officer/admin accounts** (citizen signup is self-serve, but officer/admin
    accounts are provisioned separately so nobody can grant themselves department powers):
@@ -72,6 +74,70 @@ manage resolution on a live dashboard, and status flows back to the citizen in r
 5. Watch the citizen's `/my-reports` timeline update live to match.
 6. Show `/map` for the live severity map + heatmap, and `/leaderboard` /
    `/analytics` (admin) for the gamification and city-wide stats differentiators.
+7. Geofenced alerts: on a second citizen account, visit `/alerts` and save the
+   current location as the alert location (radius defaults to 100m). Submit a
+   water/electricity/drainage/pollution report from the first account within
+   that radius — the second account gets a live "reported nearby, be aware"
+   alert via the notification bell (and a browser notification if the tab is
+   backgrounded), without ever visiting the issue.
+
+## WhatsApp integration (Meta Cloud API)
+
+Two independent features run on the [Meta WhatsApp Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api):
+citizens can log in with a phone number (OTP delivered over WhatsApp instead of
+email/password), and a chatbot on the same number lets citizens file a report by
+sending a photo and a location, no app or login required. Both are fully
+implemented and typechecked, but need your own Meta app + WhatsApp Business
+Account to actually send/receive messages — without it, the OTP flow still
+works in a **dev/demo mode** (the code is logged to the server console and
+returned in the API response instead of being sent) and the chatbot webhook
+simply has nothing to call it.
+
+### Setup
+
+1. Create a [Meta App](https://developers.facebook.com/apps) with the WhatsApp
+   product added, and a WhatsApp Business Account (WABA) with a test or
+   production phone number.
+2. Set these env vars (server-only, never exposed to the client):
+   - `WHATSAPP_PHONE_NUMBER_ID` — from the WhatsApp > API Setup page.
+   - `WHATSAPP_ACCESS_TOKEN` — a permanent access token for the app (temporary
+     tokens from the quickstart page expire in 24h).
+   - `WHATSAPP_APP_SECRET` — App Settings -> Basic. Used to verify the
+     `X-Hub-Signature-256` header on inbound webhook calls; **without it, the
+     webhook skips signature verification** (logged as a warning) — fine for
+     local testing, not for a public deployment.
+   - `WHATSAPP_VERIFY_TOKEN` — any string you choose; used once, when Meta
+     verifies the webhook URL (step 4).
+   - `WHATSAPP_OTP_TEMPLATE_NAME` — optional. Meta only allows free-form
+     business-initiated messages within a 24h window after the user last
+     messaged you; for OTPs sent outside that window you need an
+     **approved "authentication" template** (WhatsApp Manager -> Message
+     Templates) and set its name here. Without it, OTPs send as a plain text
+     message, which only works within that 24h window (e.g. test numbers, or
+     a citizen who just messaged the bot).
+3. Point your app's redeploy/tunnel URL at `POST /api/whatsapp/webhook` in
+   Meta's WhatsApp > Configuration page, subscribed to the `messages` field.
+4. Meta will call `GET /api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=...`
+   once to confirm the URL — it must echo back `hub.challenge`, which the
+   route already handles as long as `WHATSAPP_VERIFY_TOKEN` matches.
+
+### How it works
+
+- **Login** (`/login` -> WhatsApp tab): `POST /api/auth/whatsapp/request-otp`
+  generates and sends a 6-digit code (`lib/whatsapp/otp.ts`);
+  `POST /api/auth/whatsapp/verify-otp` checks it, then either finds the
+  existing profile for that phone number or provisions a new one
+  (`lib/whatsapp/profile.ts` — Supabase Auth still needs an email internally,
+  so a deterministic, never-shown shadow address is used), and bootstraps a
+  real Supabase session server-side via `admin.generateLink` +
+  `auth.verifyOtp` (no separate SMS/phone provider involved).
+- **Reporting bot** (`app/api/whatsapp/webhook/route.ts`): a citizen sends a
+  photo, then a location (as two separate WhatsApp messages); the webhook
+  holds the in-progress report in `whatsapp_report_sessions` until both
+  arrive, then runs the same AI classification + department routing as the
+  web `/report` flow and replies with the result. Duplicate detection is
+  skipped for WhatsApp reports (the "is this a duplicate?" back-and-forth
+  doesn't map well onto a chat), so every WhatsApp report files as new.
 
 ## Project structure
 
