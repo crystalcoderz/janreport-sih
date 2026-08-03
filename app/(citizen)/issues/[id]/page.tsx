@@ -7,8 +7,11 @@ import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
 import { IssueUpvoteButton } from "@/components/citizen/issue-upvote-button";
+import { IssueComments } from "@/components/issue/issue-comments";
+import { IssueVolunteerOffers } from "@/components/issue/issue-volunteer-offers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MapPin, User } from "lucide-react";
+import { getCurrentProfile } from "@/lib/auth";
 
 export default async function PublicIssueDetailPage({
   params,
@@ -17,33 +20,53 @@ export default async function PublicIssueDetailPage({
 }) {
   const { id } = await params;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const [{ data: { user } }, profile] = await Promise.all([
+    supabase.auth.getUser(),
+    getCurrentProfile(),
+  ]);
 
-  const [{ data: issue }, { data: history }, { data: myUpvote }] =
-    await Promise.all([
-      supabase
-        .from("issues")
-        .select(
-          "*, departments(name), profiles!issues_reporter_id_fkey(full_name)"
-        )
-        .eq("id", id)
-        .single(),
-      supabase
-        .from("issue_status_history")
-        .select("*, profiles(full_name)")
-        .eq("issue_id", id)
-        .order("changed_at", { ascending: true }),
-      user
-        ? supabase
-            .from("issue_upvotes")
-            .select("issue_id")
-            .eq("issue_id", id)
-            .eq("user_id", user.id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
+  const [
+    { data: issue },
+    { data: history },
+    { data: myUpvote },
+    { data: comments },
+    { data: offers },
+    { data: myGroups },
+  ] = await Promise.all([
+    supabase
+      .from("issues")
+      .select(
+        "*, departments(name), profiles!issues_reporter_id_fkey(full_name)"
+      )
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("issue_status_history")
+      .select("*, profiles(full_name)")
+      .eq("issue_id", id)
+      .order("changed_at", { ascending: true }),
+    user
+      ? supabase
+          .from("issue_upvotes")
+          .select("issue_id")
+          .eq("issue_id", id)
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("issue_comments")
+      .select("*, profiles(full_name)")
+      .eq("issue_id", id)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("issue_volunteer_offers")
+      .select("*, profiles(full_name), volunteer_groups(name)")
+      .eq("issue_id", id)
+      .order("created_at", { ascending: false }),
+    profile
+      ? supabase.from("volunteer_groups").select("id, name").eq("created_by", profile.id)
+      : Promise.resolve({ data: null }),
+  ]);
 
   if (!issue) notFound();
 
@@ -130,6 +153,51 @@ export default async function PublicIssueDetailPage({
           />
         </CardContent>
       </Card>
+
+      {profile && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Volunteers &amp; NGOs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <IssueVolunteerOffers
+              issueId={issue.id}
+              userId={profile.id}
+              myGroups={myGroups ?? []}
+              initialOffers={(offers ?? []).map((o) => ({
+                ...o,
+                offererName:
+                  (o as { profiles?: { full_name: string | null } }).profiles
+                    ?.full_name ?? null,
+                groupName:
+                  (o as { volunteer_groups?: { name: string } | null })
+                    .volunteer_groups?.name ?? null,
+              }))}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {profile && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Discussion</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <IssueComments
+              issueId={issue.id}
+              userId={profile.id}
+              userFullName={profile.full_name}
+              initialComments={(comments ?? []).map((c) => ({
+                ...c,
+                authorName: (
+                  c as { profiles?: { full_name: string | null } }
+                ).profiles?.full_name ?? null,
+              }))}
+            />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
