@@ -17,6 +17,13 @@ create type issue_status as enum (
   'rejected'
 );
 
+create type volunteer_offer_status as enum (
+  'offered',
+  'accepted',
+  'completed',
+  'withdrawn'
+);
+
 -- ---------------------------------------------------------------------
 -- Tables
 -- ---------------------------------------------------------------------
@@ -44,6 +51,10 @@ create table profiles (
     end
   ) stored,
   notify_radius_m integer not null default 100 check (notify_radius_m between 25 and 5000),
+  -- Set for citizens who signed up / logged in via the WhatsApp OTP flow
+  -- (see lib/whatsapp/otp.ts). Unique but nullable — most profiles won't
+  -- have one.
+  phone text unique,
   created_at timestamptz not null default now()
 );
 
@@ -101,6 +112,78 @@ create table issue_notifications (
   unique (issue_id, recipient_id)
 );
 
+-- Discussion threads: public comments on a reported issue ("this pothole
+-- has been here for 3 months"). Flat (no replies) by design — keep it
+-- simple, matches how issue_status_history is a flat append-only log too.
+create table issue_comments (
+  id uuid primary key default gen_random_uuid(),
+  issue_id uuid not null references issues (id) on delete cascade,
+  author_id uuid not null references profiles (id) on delete cascade,
+  body text not null check (char_length(btrim(body)) between 1 and 1000),
+  created_at timestamptz not null default now()
+);
+
+-- NGOs / citizen groups that register to help resolve smaller issues
+-- (garbage cleanups, tree planting, etc). `verified` is admin/officer-only
+-- (see the guard trigger below) so the directory can flag legitimate orgs.
+create table volunteer_groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text,
+  contact_phone text,
+  contact_email text,
+  categories text[] not null default '{}',
+  created_by uuid not null references profiles (id) on delete cascade,
+  verified boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-- One row per citizen/group that offers to help with a specific issue.
+-- volunteer_group_id is null for an individual citizen offering directly.
+create table issue_volunteer_offers (
+  id uuid primary key default gen_random_uuid(),
+  issue_id uuid not null references issues (id) on delete cascade,
+  volunteer_group_id uuid references volunteer_groups (id) on delete set null,
+  offered_by uuid not null references profiles (id) on delete cascade,
+  status volunteer_offer_status not null default 'offered',
+  note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (issue_id, offered_by)
+);
+
+-- ---------------------------------------------------------------------
+-- WhatsApp integration
+-- ---------------------------------------------------------------------
+
+-- OTP codes for the WhatsApp login flow (lib/whatsapp/otp.ts). Never
+-- exposed via RLS — only the service-role client (server-only) touches
+-- this table, matching how issue_notifications inserts are locked down.
+create table whatsapp_otp_codes (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts smallint not null default 0,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- Scratch space for an in-progress "report an issue" conversation over
+-- WhatsApp (see app/api/whatsapp/webhook/route.ts) — a citizen sends a
+-- photo and a location as separate messages, so we hold the photo here
+-- (base64 — small enough at this scale, and avoids uploading to storage
+-- twice) until both pieces have arrived and the report can be filed.
+create table whatsapp_report_sessions (
+  phone text primary key,
+  photo_base64 text,
+  photo_mime_type text,
+  lat double precision,
+  lng double precision,
+  note text,
+  updated_at timestamptz not null default now()
+);
+
 -- ---------------------------------------------------------------------
 -- Indexes
 -- ---------------------------------------------------------------------
@@ -115,6 +198,16 @@ create index profiles_home_location_gix on profiles using gist (home_location)
   where home_location is not null;
 create index issue_notifications_recipient_id_idx
   on issue_notifications (recipient_id, created_at desc);
+create index issue_comments_issue_id_idx
+  on issue_comments (issue_id, created_at asc);
+create index issue_volunteer_offers_issue_id_idx
+  on issue_volunteer_offers (issue_id);
+create index issue_volunteer_offers_group_id_idx
+  on issue_volunteer_offers (volunteer_group_id);
+create index volunteer_groups_created_by_idx
+  on volunteer_groups (created_by);
+create index whatsapp_otp_codes_phone_idx
+  on whatsapp_otp_codes (phone, created_at desc);
 
 -- ---------------------------------------------------------------------
 -- Functions & triggers
@@ -326,6 +419,46 @@ create trigger issue_notifications_guard_columns
   before update on issue_notifications
   for each row execute function prevent_issue_notification_tamper();
 
+create function touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+create trigger issue_volunteer_offers_set_updated_at
+  before update on issue_volunteer_offers
+  for each row execute function touch_updated_at();
+
+-- Only an officer/admin may flip a volunteer group's `verified` flag —
+-- otherwise a group could self-certify as legitimate. Mirrors
+-- prevent_profile_privilege_escalation's approach above.
+create function prevent_volunteer_group_self_verify()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.verified is distinct from old.verified
+    and not exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('officer', 'admin')
+    )
+  then
+    new.verified := old.verified;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger volunteer_groups_guard_verified
+  before update on volunteer_groups
+  for each row execute function prevent_volunteer_group_self_verify();
+
 -- ---------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------
@@ -336,6 +469,14 @@ alter table issues enable row level security;
 alter table issue_upvotes enable row level security;
 alter table issue_status_history enable row level security;
 alter table issue_notifications enable row level security;
+alter table issue_comments enable row level security;
+alter table volunteer_groups enable row level security;
+alter table issue_volunteer_offers enable row level security;
+-- No policies: whatsapp_otp_codes and whatsapp_report_sessions are
+-- service-role-only, so RLS with zero grants blocks every client-side
+-- (anon/authenticated) access outright.
+alter table whatsapp_otp_codes enable row level security;
+alter table whatsapp_report_sessions enable row level security;
 
 -- profiles: any signed-in user can read profiles (names/roles are not
 -- sensitive here); users may only edit their own row, and privileged
@@ -405,13 +546,77 @@ create policy "issue_notifications_update_own" on issue_notifications
   using (recipient_id = auth.uid())
   with check (recipient_id = auth.uid());
 
+-- issue_comments: readable by all (public discussion thread), only
+-- writable/deletable by the comment's own author. No edits — matches the
+-- append-only spirit of issue_status_history.
+create policy "issue_comments_select_authenticated" on issue_comments
+  for select to authenticated using (true);
+
+create policy "issue_comments_insert_own" on issue_comments
+  for insert to authenticated with check (author_id = auth.uid());
+
+create policy "issue_comments_delete_own" on issue_comments
+  for delete to authenticated using (author_id = auth.uid());
+
+-- volunteer_groups: public directory (readable by all signed-in users),
+-- self-registered by any citizen, editable by the group's own registrant
+-- or an officer/admin (the only ones who can flip `verified`, guarded
+-- above).
+create policy "volunteer_groups_select_authenticated" on volunteer_groups
+  for select to authenticated using (true);
+
+create policy "volunteer_groups_insert_own" on volunteer_groups
+  for insert to authenticated with check (created_by = auth.uid());
+
+create policy "volunteer_groups_update_own_or_officer_admin" on volunteer_groups
+  for update to authenticated using (
+    created_by = auth.uid()
+    or exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('officer', 'admin')
+    )
+  ) with check (
+    created_by = auth.uid()
+    or exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('officer', 'admin')
+    )
+  );
+
+-- issue_volunteer_offers: readable by all (transparency on who's helping),
+-- offered only as yourself, withdrawn/updated only by the offerer or an
+-- officer/admin (to mark accepted/completed).
+create policy "issue_volunteer_offers_select_authenticated" on issue_volunteer_offers
+  for select to authenticated using (true);
+
+create policy "issue_volunteer_offers_insert_own" on issue_volunteer_offers
+  for insert to authenticated with check (offered_by = auth.uid());
+
+create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volunteer_offers
+  for update to authenticated using (
+    offered_by = auth.uid()
+    or exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('officer', 'admin')
+    )
+  ) with check (
+    offered_by = auth.uid()
+    or exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('officer', 'admin')
+    )
+  );
+
 -- ---------------------------------------------------------------------
 -- Realtime: let the officer dashboard subscribe to live issue changes,
--- and citizens subscribe to their own geofenced alerts.
+-- citizens subscribe to their own geofenced alerts, issue detail pages
+-- subscribe to new discussion comments, and volunteer offers update live.
 -- ---------------------------------------------------------------------
 
 alter publication supabase_realtime add table issues;
 alter publication supabase_realtime add table issue_notifications;
+alter publication supabase_realtime add table issue_comments;
+alter publication supabase_realtime add table issue_volunteer_offers;
 
 -- ---------------------------------------------------------------------
 -- Storage: public bucket for issue photos
