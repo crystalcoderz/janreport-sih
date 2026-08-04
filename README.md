@@ -39,6 +39,9 @@ manage resolution on a live dashboard, and status flows back to the citizen in r
    - `ANTHROPIC_API_KEY`
    - `WHATSAPP_*` — optional, see [WhatsApp integration](#whatsapp-integration-meta-cloud-api)
      below. Everything else works without these.
+   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` — optional, see
+     [Web Push](#web-push-notifications) below. Generate with
+     `node scripts/generate-vapid-keys.mjs`.
 
 6. **Seed demo officer/admin accounts** (citizen signup is self-serve, but officer/admin
    accounts are provisioned separately so nobody can grant themselves department powers):
@@ -138,6 +141,30 @@ simply has nothing to call it.
   web `/report` flow and replies with the result. Duplicate detection is
   skipped for WhatsApp reports (the "is this a duplicate?" back-and-forth
   doesn't map well onto a chat), so every WhatsApp report files as new.
+
+## Web Push notifications
+
+Geofenced nearby alerts (see the demo script above) always work in-app — the
+notification bell and toasts arrive over Supabase Realtime as long as a tab
+is open. Web Push extends that to a real OS-level notification even with
+JanReport fully closed.
+
+1. Generate a VAPID keypair: `node scripts/generate-vapid-keys.mjs`, and put
+   the two values into `.env.local` as `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and
+   `VAPID_PRIVATE_KEY`. Regenerating invalidates every existing subscription
+   (citizens would need to re-enable notifications).
+2. On `/alerts`, click "Enable push notifications on this device" — this
+   registers `public/sw.js` as a service worker and saves the resulting
+   subscription (`push_subscriptions` table) against the signed-in citizen.
+3. Whenever a qualifying issue is reported (web `/report` or the WhatsApp
+   bot), `lib/push/fanout.ts` reads back the exact recipient list the
+   geofencing trigger already computed (`issue_notifications`), and sends a
+   push to every subscribed device among them via `web-push`
+   (`lib/push/client.ts`), pruning subscriptions the push service reports as
+   expired (410/404).
+
+Without `VAPID_*` configured, `isPushConfigured()` short-circuits and
+everything else works unchanged — just without the OS-level push.
 
 ## Project structure
 
