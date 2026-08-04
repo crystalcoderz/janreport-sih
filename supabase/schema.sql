@@ -1,6 +1,13 @@
 -- JanReport (SIH25031) — schema, RLS policies, triggers, seed data.
 -- Run this once against a fresh Supabase project (SQL Editor -> New query).
 
+-- Known, accepted Supabase advisor findings after running this file:
+-- - `spatial_ref_sys` (RLS disabled) and `extension_in_public` (postgis)
+--   are PostGIS/extension-owned; the connecting role isn't the owner, so
+--   they can't be fixed via migration, and they carry no sensitive data
+--   (spatial_ref_sys is just public SRID reference rows).
+-- - `st_estimatedextent` "SECURITY DEFINER exposed to anon" is a PostGIS-
+--   internal function, not ours to touch.
 create extension if not exists postgis;
 
 -- ---------------------------------------------------------------------
@@ -279,6 +286,7 @@ create trigger profiles_guard_privileged_columns
 create function touch_issues_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at := now();
@@ -294,6 +302,7 @@ create trigger issues_set_updated_at
 create function apply_upvote_delta()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   if tg_op = 'INSERT' then
@@ -358,6 +367,7 @@ create function nearby_open_issues(
 returns setof issues
 language sql
 stable
+set search_path = public
 as $$
   select *
   from issues
@@ -380,6 +390,7 @@ create function area_alert_categories()
 returns text[]
 language sql
 immutable
+set search_path = public
 as $$
   select array[
     'water_supply',
@@ -441,6 +452,7 @@ create trigger issue_notifications_guard_columns
 create function touch_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at := now();
@@ -477,6 +489,21 @@ $$;
 create trigger volunteer_groups_guard_verified
   before update on volunteer_groups
   for each row execute function prevent_volunteer_group_self_verify();
+
+-- These are all trigger-only functions (return type "trigger"), so
+-- Postgres already refuses to run them outside an actual trigger context
+-- — but Supabase grants EXECUTE on every public-schema function to
+-- anon/authenticated by default, and being SECURITY DEFINER makes that a
+-- real (if inert) RPC exposure the linter flags. Revoke the unnecessary
+-- grant; PostgREST/anon and authenticated must go from PUBLIC *and* the
+-- named roles, since Supabase grants them explicitly, not just via PUBLIC.
+revoke execute on function handle_new_user() from public, anon, authenticated;
+revoke execute on function prevent_profile_privilege_escalation() from public, anon, authenticated;
+revoke execute on function award_points_on_issue_report() from public, anon, authenticated;
+revoke execute on function award_points_on_issue_resolved() from public, anon, authenticated;
+revoke execute on function notify_nearby_residents() from public, anon, authenticated;
+revoke execute on function prevent_issue_notification_tamper() from public, anon, authenticated;
+revoke execute on function prevent_volunteer_group_self_verify() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- Row Level Security
@@ -664,8 +691,12 @@ insert into storage.buckets (id, name, public)
 values ('issue-photos', 'issue-photos', true)
 on conflict (id) do nothing;
 
-create policy "issue_photos_public_read" on storage.objects
-  for select using (bucket_id = 'issue-photos');
+-- No SELECT policy needed: a public bucket already bypasses storage RLS
+-- entirely for reads (Supabase docs: "public buckets... bypasses access
+-- controls for retrieving and serving files"). Adding one anyway would
+-- only grant a side effect the linter flags — LISTing every file in the
+-- bucket (enumerating other citizens' report photos), not just fetching
+-- a known URL.
 
 create policy "issue_photos_authenticated_upload" on storage.objects
   for insert to authenticated with check (

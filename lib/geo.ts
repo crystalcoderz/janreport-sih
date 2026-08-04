@@ -1,7 +1,6 @@
-// Reverse-geocodes coordinates to a human-readable address via OSM
-// Nominatim (free, no API key). Best-effort — failures return null so the
-// report flow never blocks on this.
-export async function reverseGeocode(
+// Reverse-geocodes via OSM Nominatim (free, no API key). Best-effort —
+// failures return null so the report flow never blocks on this.
+async function reverseGeocodeNominatim(
   lat: number,
   lng: number
 ): Promise<string | null> {
@@ -16,6 +15,41 @@ export async function reverseGeocode(
   } catch {
     return null;
   }
+}
+
+// Reverse-geocodes via Google's Geocoding API — more reliable addresses
+// than Nominatim, used when GOOGLE_MAPS_API_KEY is configured.
+async function reverseGeocodeGoogle(
+  lat: number,
+  lng: number,
+  apiKey: string
+): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.results?.[0]?.formatted_address ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Reverse-geocodes coordinates to a human-readable address. Uses Google's
+// Geocoding API when GOOGLE_MAPS_API_KEY is set, otherwise falls back to
+// the free Nominatim endpoint above. Best-effort either way — failures
+// return null so the report flow never blocks on this.
+export async function reverseGeocode(
+  lat: number,
+  lng: number
+): Promise<string | null> {
+  const googleApiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (googleApiKey) {
+    const address = await reverseGeocodeGoogle(lat, lng, googleApiKey);
+    if (address) return address;
+  }
+  return reverseGeocodeNominatim(lat, lng);
 }
 
 const EARTH_RADIUS_M = 6371000;

@@ -3,6 +3,8 @@ import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
+import { computeCityStats } from "@/lib/analytics";
+import { CityBriefing } from "@/components/analytics/city-briefing";
 
 export default async function AnalyticsPage() {
   const profile = await getCurrentProfile();
@@ -20,56 +22,9 @@ export default async function AnalyticsPage() {
         .eq("status", "resolved"),
     ]);
 
-  const allIssues = issues ?? [];
-  const total = allIssues.length;
-  const resolved = allIssues.filter((i) => i.status === "resolved").length;
-  const critical = allIssues.filter((i) => i.ai_severity >= 9).length;
-  const resolutionRate = total ? Math.round((resolved / total) * 100) : 0;
-  const avgSeverity = total
-    ? (allIssues.reduce((s, i) => s + i.ai_severity, 0) / total).toFixed(1)
-    : "0";
-
-  const resolvedAtByIssue = new Map(
-    (resolvedHistory ?? []).map((h) => [h.issue_id, h.changed_at])
-  );
-
-  const perDepartment = (departments ?? []).map((dept) => {
-    const deptIssues = allIssues.filter((i) => i.department_id === dept.id);
-    const deptResolved = deptIssues.filter((i) => i.status === "resolved");
-    const resolutionTimesHrs = deptResolved
-      .map((i) => {
-        const resolvedAt = resolvedAtByIssue.get(i.id);
-        if (!resolvedAt) return null;
-        return (
-          (new Date(resolvedAt).getTime() - new Date(i.created_at).getTime()) /
-          3_600_000
-        );
-      })
-      .filter((v): v is number => v !== null);
-    const avgHrs = resolutionTimesHrs.length
-      ? resolutionTimesHrs.reduce((a, b) => a + b, 0) / resolutionTimesHrs.length
-      : null;
-
-    return {
-      name: dept.name,
-      total: deptIssues.length,
-      open: deptIssues.filter(
-        (i) => i.status !== "resolved" && i.status !== "rejected"
-      ).length,
-      resolved: deptResolved.length,
-      avgHrs,
-    };
-  });
-
-  const perCategory = Object.entries(
-    allIssues.reduce<Record<string, number>>((acc, i) => {
-      acc[i.ai_category] = (acc[i.ai_category] ?? 0) + 1;
-      return acc;
-    }, {})
-  ).sort((a, b) => b[1] - a[1]);
-
-  const maxCategoryCount = Math.max(1, ...perCategory.map(([, c]) => c));
-  const maxDeptCount = Math.max(1, ...perDepartment.map((d) => d.total));
+  const stats = computeCityStats(issues ?? [], departments ?? [], resolvedHistory ?? []);
+  const maxCategoryCount = Math.max(1, ...stats.perCategory.map(([, c]) => c));
+  const maxDeptCount = Math.max(1, ...stats.perDepartment.map((d) => d.total));
 
   return (
     <div className="flex flex-col gap-6">
@@ -81,11 +36,13 @@ export default async function AnalyticsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label="Total reports" value={total} />
-        <StatTile label="Resolution rate" value={`${resolutionRate}%`} />
-        <StatTile label="Critical open" value={critical} tone="critical" />
-        <StatTile label="Avg severity" value={avgSeverity} />
+        <StatTile label="Total reports" value={stats.total} />
+        <StatTile label="Resolution rate" value={`${stats.resolutionRate}%`} />
+        <StatTile label="Critical open" value={stats.critical} tone="critical" />
+        <StatTile label="Avg severity" value={stats.avgSeverity} />
       </div>
+
+      <CityBriefing />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
@@ -93,7 +50,7 @@ export default async function AnalyticsPage() {
             <CardTitle className="text-base">By department</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {perDepartment.map((d) => (
+            {stats.perDepartment.map((d) => (
               <div key={d.name} className="flex flex-col gap-1">
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">{d.name}</span>
@@ -120,7 +77,7 @@ export default async function AnalyticsPage() {
             <CardTitle className="text-base">By category</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {perCategory.map(([category, count]) => (
+            {stats.perCategory.map(([category, count]) => (
               <div key={category} className="flex flex-col gap-1">
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">

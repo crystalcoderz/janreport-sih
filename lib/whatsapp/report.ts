@@ -4,6 +4,7 @@ import { reverseGeocode } from "@/lib/geo";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { getOrCreateProfileByPhone } from "@/lib/whatsapp/profile";
 import { sendWhatsAppText } from "@/lib/whatsapp/client";
+import { uploadIssuePhoto } from "@/lib/storage";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
@@ -96,18 +97,19 @@ export async function finalizeReportIfReady(phone: string): Promise<boolean> {
   const ext = (session.photo_mime_type ?? "image/jpeg").split("/")[1]?.replace("jpeg", "jpg") || "jpg";
   const path = `${profile.id}/${crypto.randomUUID()}.${ext}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from("issue-photos")
-    .upload(path, buffer, { contentType: session.photo_mime_type ?? "image/jpeg" });
-  if (uploadError) {
+  let publicUrl: string;
+  try {
+    ({ publicUrl } = await uploadIssuePhoto({
+      supabase,
+      path,
+      body: buffer,
+      contentType: session.photo_mime_type ?? "image/jpeg",
+    }));
+  } catch (uploadError) {
     console.error("WhatsApp photo upload failed", uploadError);
     await sendWhatsAppText(phone, "Sorry, something went wrong saving your photo. Please try again.");
     return true;
   }
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from("issue-photos").getPublicUrl(path);
 
   const [address, departmentResult] = await Promise.all([
     reverseGeocode(session.lat, session.lng),

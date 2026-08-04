@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { classifyIssuePhoto } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
+import { uploadIssuePhoto } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -93,21 +94,21 @@ export async function POST(request: NextRequest) {
   const ext = photo.type.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
   const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
 
-  const { error: uploadError } = await supabase.storage
-    .from("issue-photos")
-    .upload(path, buffer, { contentType: photo.type });
-
-  if (uploadError) {
+  let publicUrl: string;
+  try {
+    ({ publicUrl } = await uploadIssuePhoto({
+      supabase,
+      path,
+      body: buffer,
+      contentType: photo.type,
+    }));
+  } catch (uploadError) {
     console.error("Photo upload failed", uploadError);
     return NextResponse.json(
       { error: "Failed to upload photo" },
       { status: 500 }
     );
   }
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from("issue-photos").getPublicUrl(path);
 
   const [address, departmentResult] = await Promise.all([
     reverseGeocode(lat, lng),
