@@ -25,8 +25,15 @@ export function useIssueNotifications(userId: string, initial: NearbyAlert[]) {
 
   useEffect(() => {
     const supabase = createClient();
+    // Unique per effect invocation (not per component instance) — React
+    // Strict Mode's dev-only mount/cleanup/mount double-invoke can run
+    // this before the previous channel's async removeChannel() finishes,
+    // and supabase-js reuses an existing channel with a matching topic,
+    // which throws "cannot add postgres_changes callbacks after
+    // subscribe()" on the second .on() call. A fresh topic each run
+    // sidesteps that entirely.
     const channel = supabase
-      .channel(`issue-notifications-${userId}`)
+      .channel(`issue-notifications-${userId}-${crypto.randomUUID()}`)
       .on(
         "postgres_changes",
         {

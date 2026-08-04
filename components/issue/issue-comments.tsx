@@ -30,8 +30,10 @@ export function IssueComments({
 
   useEffect(() => {
     const supabase = createClient();
+    // Unique per effect invocation — see use-issue-notifications.ts for why
+    // (Strict Mode dev double-invoke + supabase-js channel topic reuse).
     const channel = supabase
-      .channel(`issue-comments-${issueId}`)
+      .channel(`issue-comments-${issueId}-${crypto.randomUUID()}`)
       .on(
         "postgres_changes",
         {

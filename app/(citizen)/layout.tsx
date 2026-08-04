@@ -1,17 +1,17 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { AppNav } from "@/components/layout/app-nav";
+import { AppNav, type NavLink } from "@/components/layout/app-nav";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import type { NearbyAlert } from "@/lib/hooks/use-issue-notifications";
+import { HelpChat } from "@/components/chat/help-chat";
 
-const CITIZEN_LINKS = [
-  { href: "/report", label: "Report Issue" },
-  { href: "/my-reports", label: "My Reports" },
-  { href: "/map", label: "Map" },
-  { href: "/alerts", label: "Nearby Alerts" },
-  { href: "/volunteer", label: "Volunteer" },
-  { href: "/leaderboard", label: "Leaderboard" },
+const CITIZEN_LINKS: NavLink[] = [
+  { href: "/report", labelKey: "nav.report" },
+  { href: "/my-reports", labelKey: "nav.myReports" },
+  { href: "/map", labelKey: "nav.map" },
+  { href: "/alerts", labelKey: "nav.alerts" },
+  { href: "/volunteer", labelKey: "nav.volunteer" },
 ];
 
 export default async function CitizenLayout({
@@ -57,6 +57,7 @@ export default async function CitizenLayout({
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         {children}
       </main>
+      <HelpChat />
     </div>
   );
 }

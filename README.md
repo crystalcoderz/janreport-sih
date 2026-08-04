@@ -1,18 +1,27 @@
 # JanReport — Crowdsourced Civic Issue Reporting & Resolution System
 
+[![CI](https://github.com/crystalcoderz/janreport/actions/workflows/ci.yml/badge.svg)](https://github.com/crystalcoderz/janreport/actions/workflows/ci.yml)
+
 Built for **SIH25031** (Govt of Jharkhand, Clean & Green Technology theme).
 
 Citizens report civic issues (potholes, garbage, water/electricity faults, accidents, etc.)
-with a photo and GPS location. AI (Claude vision) classifies the issue and scores its
+with a photo and GPS location. AI (Gemini vision) classifies the issue and scores its
 severity, the system auto-routes it to the responsible municipal department, officers
 manage resolution on a live dashboard, and status flows back to the citizen in real time.
+Kimi (Moonshot AI) powers three agent-style extras: an AI city briefing for admins, a
+citizen help chatbot, and an officer resolution-note drafting assistant.
 
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript) — citizen PWA, officer/admin dashboard, and API
   routes in one codebase
 - **Supabase** — Postgres (+ PostGIS), Auth, Storage, Realtime
-- **Claude (Anthropic API)** — vision-based issue classification & severity scoring
+- **Gemini (Google)** — vision-based issue classification & severity scoring
+  (`lib/ai/classify.ts`)
+- **Kimi (Moonshot AI)** — AI city briefing, help chatbot, resolution-note drafting
+  (`lib/kimi/`) — optional, degrades gracefully if unconfigured
+- **Google Maps Geocoding API** — optional, reverse-geocoding; falls back to free OSM
+  Nominatim if unset
 - **Leaflet** — live issue map, severity markers, heatmap
 
 ## One-time setup
@@ -30,13 +39,24 @@ manage resolution on a live dashboard, and status flows back to the citizen in r
    tables, RLS policies, triggers, the `issue-photos` storage bucket, and seeds the
    municipal departments.
 
-4. **Get an Anthropic API key** at [console.anthropic.com](https://console.anthropic.com).
+4. **Get a Gemini API key** at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+   (required — powers the core photo classification step).
 
 5. **Configure environment variables.** Copy `.env.local.example` to `.env.local` and fill
    in:
    - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Project Settings -> API
    - `SUPABASE_SERVICE_ROLE_KEY` — same page (keep secret, server-only)
-   - `ANTHROPIC_API_KEY`
+   - `GEMINI_API_KEY`
+   - `GOOGLE_MAPS_API_KEY` — optional, see [Stack](#stack) above. Falls back to free
+     Nominatim geocoding if unset.
+   - `KIMI_API_KEY` — optional, see [AI features (Kimi)](#ai-features-kimi) below. The
+     briefing/chatbot/note-drafting features return a clear error if unset; nothing else
+     depends on it.
+   - `R2_*` — optional. Set all of `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+     `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL` to store issue photos in Cloudflare R2
+     instead of Supabase Storage (`lib/storage.ts` picks the backend at runtime and falls
+     back to Supabase when unset). Also add your R2 public host to `next.config.ts`
+     `images.remotePatterns`.
    - `WHATSAPP_*` — optional, see [WhatsApp integration](#whatsapp-integration-meta-cloud-api)
      below. Everything else works without these.
    - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` — optional, see
@@ -77,6 +97,7 @@ manage resolution on a live dashboard, and status flows back to the citizen in r
 5. Watch the citizen's `/my-reports` timeline update live to match.
 6. Show `/map` for the live severity map + heatmap, and `/leaderboard` /
    `/analytics` (admin) for the gamification and city-wide stats differentiators.
+   On `/analytics`, click "Generate briefing" for the AI City Briefing (Kimi).
 7. Geofenced alerts: on a second citizen account, visit `/alerts` and save the
    current location as the alert location (radius defaults to 100m). Submit a
    water/electricity/drainage/pollution report from the first account within
@@ -141,6 +162,21 @@ simply has nothing to call it.
   web `/report` flow and replies with the result. Duplicate detection is
   skipped for WhatsApp reports (the "is this a duplicate?" back-and-forth
   doesn't map well onto a chat), so every WhatsApp report files as new.
+
+## AI features (Kimi)
+
+Three optional features run on [Kimi](https://platform.moonshot.ai) (Moonshot AI),
+via its OpenAI-compatible endpoint (`lib/kimi/client.ts`). All three return a clear
+"not configured" error — nothing else breaks — if `KIMI_API_KEY` is unset.
+
+- **AI City Briefing** (`/analytics`, admin only): summarizes live city-wide stats
+  (`lib/analytics.ts`) into a short natural-language briefing with prioritization
+  recommendations. Click "Generate briefing".
+- **Citizen help chatbot**: floating widget on every citizen page
+  (`components/chat/help-chat.tsx`), answers questions about how to use JanReport.
+- **Officer resolution-note drafting**: "Draft with AI" button next to the status
+  note field on an issue's detail page — drafts a note from the issue's details and
+  target status, which the officer can edit before submitting.
 
 ## Web Push notifications
 

@@ -14,9 +14,9 @@ export default async function OfficerLayout({
   }
 
   const links = [
-    { href: "/dashboard", label: "Dashboard" },
+    { href: "/dashboard", labelKey: "nav.dashboard" as const },
     ...(profile.role === "admin"
-      ? [{ href: "/analytics", label: "Analytics" }]
+      ? [{ href: "/analytics", labelKey: "nav.analytics" as const }]
       : []),
   ];
 

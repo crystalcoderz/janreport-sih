@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { formatDistanceToNow } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
-import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { IssueTimeline, type TimelineEntry } from "@/components/issue/issue-timeline";
@@ -15,6 +14,12 @@ import type { Database } from "@/lib/supabase/types";
 import { toast } from "sonner";
 import { useNotificationPermission } from "@/lib/hooks/use-notification-permission";
 import { Bell } from "lucide-react";
+import { useTranslation } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/translations";
+
+function categoryKey(category: string): TranslationKey {
+  return `category.${category}` as TranslationKey;
+}
 
 type Issue = Database["public"]["Tables"]["issues"]["Row"] & {
   departments?: { name: string } | null;
@@ -35,11 +40,14 @@ export function MyReportsClient({
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>(history);
   const { permission, request, notify } = useNotificationPermission();
+  const { t } = useTranslation();
 
   useEffect(() => {
     const supabase = createClient();
+    // Unique per effect invocation — see use-issue-notifications.ts for why
+    // (Strict Mode dev double-invoke + supabase-js channel topic reuse).
     const channel = supabase
-      .channel("my-reports")
+      .channel(`my-reports-${crypto.randomUUID()}`)
       .on(
         "postgres_changes",
         {
@@ -105,11 +113,12 @@ export function MyReportsClient({
   if (issues.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-20 text-center">
-        <p className="text-lg font-medium">You haven&apos;t reported anything yet</p>
-        <p className="text-muted-foreground">
-          Spotted a civic issue? Report it and track its resolution here.
-        </p>
-        <Button render={<Link href="/report">Report an issue</Link>} />
+        <p className="text-lg font-medium">{t("myReports.emptyTitle")}</p>
+        <p className="text-muted-foreground">{t("myReports.emptyDescription")}</p>
+        <Button
+          nativeButton={false}
+          render={<Link href="/report">{t("myReports.emptyCta")}</Link>}
+        />
       </div>
     );
   }
@@ -118,15 +127,13 @@ export function MyReportsClient({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">My Reports</h1>
-          <p className="text-muted-foreground">
-            Track the status of issues you&apos;ve reported.
-          </p>
+          <h1 className="text-2xl font-bold">{t("myReports.title")}</h1>
+          <p className="text-muted-foreground">{t("myReports.description")}</p>
         </div>
         {permission === "default" && (
           <Button variant="outline" size="sm" onClick={request}>
             <Bell className="size-4" />
-            Enable notifications
+            {t("myReports.enableNotifications")}
           </Button>
         )}
       </div>
@@ -149,8 +156,7 @@ export function MyReportsClient({
                     <StatusBadge status={issue.status} />
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {CATEGORY_LABELS[issue.ai_category as IssueCategory] ??
-                      issue.ai_category}{" "}
+                    {t(categoryKey(issue.ai_category))}{" "}
                     · {issue.departments?.name ?? "Unassigned"}
                   </p>
                   <div className="mt-1 flex items-center gap-2">

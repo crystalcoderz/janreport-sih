@@ -17,10 +17,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
+import { type IssueCategory } from "@/lib/departments";
 import type { Database } from "@/lib/supabase/types";
 import { MapPin, Sparkles, ThumbsUp, CheckCircle2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/translations";
+
+function categoryKey(category: string): TranslationKey {
+  return `category.${category}` as TranslationKey;
+}
 
 type Issue = Database["public"]["Tables"]["issues"]["Row"] & {
   departments?: { name: string } | null;
@@ -48,6 +54,7 @@ export default function ReportPage() {
   const [submitting, setSubmitting] = useState(false);
   const [view, setView] = useState<ViewState>({ step: "form" });
   const speech = useSpeechToText();
+  const { t } = useTranslation();
 
   function toggleVoiceNote() {
     if (speech.listening) {
@@ -64,11 +71,11 @@ export default function ReportPage() {
 
   async function submitReport(forceNew: boolean) {
     if (!photo) {
-      toast.error("Add a photo of the issue first.");
+      toast.error(t("report.addPhotoFirst"));
       return;
     }
     if (!position) {
-      toast.error("Share your location first.");
+      toast.error(t("report.shareLocationFirst"));
       return;
     }
 
@@ -99,7 +106,7 @@ export default function ReportPage() {
           duplicates: data.duplicates,
         });
       } else {
-        toast.success("Issue reported — thank you!");
+        toast.success(t("report.reportedSuccess"));
         setView({ step: "success", issue: data.issue });
       }
     } catch {
@@ -147,20 +154,17 @@ export default function ReportPage() {
     <div className="mx-auto max-w-lg">
       <Card>
         <CardHeader>
-          <CardTitle>Report a civic issue</CardTitle>
-          <CardDescription>
-            Add a photo and your location — AI handles classification and
-            routing.
-          </CardDescription>
+          <CardTitle>{t("report.title")}</CardTitle>
+          <CardDescription>{t("report.description")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
           <div className="flex flex-col gap-2">
-            <Label>Photo</Label>
+            <Label>{t("report.photoLabel")}</Label>
             <PhotoCapture onChange={setPhoto} />
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label>Location</Label>
+            <Label>{t("report.locationLabel")}</Label>
             {position ? (
               <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm">
                 <MapPin className="size-4 text-primary" />
@@ -178,8 +182,8 @@ export default function ReportPage() {
               >
                 <MapPin className="size-4" />
                 {geoStatus === "locating"
-                  ? "Getting location..."
-                  : "Share current location"}
+                  ? t("report.gettingLocation")
+                  : t("report.shareLocation")}
               </Button>
             )}
             {geoError && <p className="text-sm text-destructive">{geoError}</p>}
@@ -187,7 +191,7 @@ export default function ReportPage() {
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="note">Note (optional)</Label>
+              <Label htmlFor="note">{t("report.noteLabel")}</Label>
               {speech.supported && (
                 <Button
                   type="button"
@@ -198,12 +202,12 @@ export default function ReportPage() {
                   {speech.listening ? (
                     <>
                       <Square className="size-3.5" />
-                      Stop
+                      {t("report.stop")}
                     </>
                   ) : (
                     <>
                       <Mic className="size-3.5" />
-                      Speak note
+                      {t("report.speakNote")}
                     </>
                   )}
                 </Button>
@@ -211,13 +215,13 @@ export default function ReportPage() {
             </div>
             <Textarea
               id="note"
-              placeholder="Anything else officers should know?"
+              placeholder={t("report.notePlaceholder")}
               value={speech.listening && speech.transcript ? `${note} ${speech.transcript}`.trim() : note}
               onChange={(e) => setNote(e.target.value)}
               rows={3}
             />
             {speech.listening && (
-              <p className="text-xs text-muted-foreground">Listening...</p>
+              <p className="text-xs text-muted-foreground">{t("report.listening")}</p>
             )}
           </div>
 
@@ -227,7 +231,7 @@ export default function ReportPage() {
             onClick={() => submitReport(false)}
           >
             <Sparkles className="size-4" />
-            {submitting ? "Analyzing with AI..." : "Submit report"}
+            {submitting ? t("report.analyzing") : t("report.submit")}
           </Button>
         </CardContent>
       </Card>
@@ -242,16 +246,17 @@ function SuccessCard({
   issue: Issue;
   onReportAnother: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mx-auto max-w-lg">
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
             <CheckCircle2 className="size-5" />
-            <CardTitle>Report submitted</CardTitle>
+            <CardTitle>{t("report.successTitle")}</CardTitle>
           </div>
           <CardDescription>
-            Routed to {issue.departments?.name ?? "the relevant department"}.
+            {t("report.routedTo")} {issue.departments?.name ?? "the relevant department"}.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -265,12 +270,11 @@ function SuccessCard({
           />
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium">
-              {CATEGORY_LABELS[issue.ai_category as IssueCategory] ??
-                issue.ai_category}
+              {t(categoryKey(issue.ai_category))}
             </span>
             <SeverityBadge severity={issue.ai_severity} />
             <span className="text-xs text-muted-foreground">
-              {Math.round(issue.ai_confidence * 100)}% AI confidence
+              {Math.round(issue.ai_confidence * 100)}% {t("report.aiConfidence")}
             </span>
           </div>
           <div>
@@ -280,10 +284,11 @@ function SuccessCard({
           <div className="flex gap-2">
             <Button
               className="flex-1"
-              render={<Link href="/my-reports">Track this report</Link>}
+              nativeButton={false}
+              render={<Link href="/my-reports">{t("report.trackThisReport")}</Link>}
             />
             <Button variant="outline" className="flex-1" onClick={onReportAnother}>
-              Report another
+              {t("report.reportAnother")}
             </Button>
           </div>
         </CardContent>
@@ -305,14 +310,15 @@ function DuplicatesCard({
   onReportAnyway: () => void;
   submitting: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mx-auto max-w-lg">
       <Card>
         <CardHeader>
-          <CardTitle>Looks like this may already be reported</CardTitle>
+          <CardTitle>{t("report.duplicateTitle")}</CardTitle>
           <CardDescription>
             We found {duplicates.length} similar{" "}
-            {CATEGORY_LABELS[classification.category]} report
+            {t(categoryKey(classification.category))} report
             {duplicates.length > 1 ? "s" : ""} nearby. Upvoting boosts its
             priority instead of creating a duplicate ticket.
           </CardDescription>
@@ -339,7 +345,7 @@ function DuplicatesCard({
               </div>
               <Button size="sm" onClick={() => onUpvote(d.id)}>
                 <ThumbsUp className="size-4" />
-                Upvote
+                {t("report.upvote")}
               </Button>
             </div>
           ))}
@@ -348,7 +354,7 @@ function DuplicatesCard({
             disabled={submitting}
             onClick={onReportAnyway}
           >
-            This is a different issue — submit as new
+            {t("report.submitAsNew")}
           </Button>
         </CardContent>
       </Card>

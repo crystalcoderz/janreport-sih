@@ -1,7 +1,12 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type } from "@google/genai";
 import { ISSUE_CATEGORIES, type IssueCategory } from "@/lib/departments";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// "-latest" alias tracks the current Flash model, so this doesn't rot the
+// way a pinned version does (gemini-2.5-flash is already 404 for new API
+// keys). Still overridable per-environment.
+const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 
 export interface ClassificationResult {
   category: IssueCategory;
@@ -12,43 +17,39 @@ export interface ClassificationResult {
   description: string;
 }
 
-const CLASSIFY_TOOL: Anthropic.Tool = {
-  name: "submit_classification",
-  description:
-    "Submit the structured classification for a reported civic issue photo.",
-  input_schema: {
-    type: "object",
-    properties: {
-      category: {
-        type: "string",
-        enum: [...ISSUE_CATEGORIES],
-        description: "The single best-matching civic issue category.",
-      },
-      severity: {
-        type: "integer",
-        minimum: 1,
-        maximum: 10,
-        description:
-          "Severity/urgency score. 1-2 minimal, 3-4 low, 5-6 moderate, 7-8 high, 9-10 critical (danger to life/safety, major service outage).",
-      },
-      confidence: {
-        type: "number",
-        minimum: 0,
-        maximum: 1,
-        description: "Model's confidence in this classification.",
-      },
-      title: {
-        type: "string",
-        description: "A short (<=8 word) human-readable issue title.",
-      },
-      description: {
-        type: "string",
-        description:
-          "A 1-2 sentence objective description of what is visible in the photo, for the municipal officer.",
-      },
+const RESPONSE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    category: {
+      type: Type.STRING,
+      format: "enum",
+      enum: [...ISSUE_CATEGORIES],
+      description: "The single best-matching civic issue category.",
     },
-    required: ["category", "severity", "confidence", "title", "description"],
+    severity: {
+      type: Type.INTEGER,
+      minimum: 1,
+      maximum: 10,
+      description:
+        "Severity/urgency score. 1-2 minimal, 3-4 low, 5-6 moderate, 7-8 high, 9-10 critical (danger to life/safety, major service outage).",
+    },
+    confidence: {
+      type: Type.NUMBER,
+      minimum: 0,
+      maximum: 1,
+      description: "Model's confidence in this classification.",
+    },
+    title: {
+      type: Type.STRING,
+      description: "A short (<=8 word) human-readable issue title.",
+    },
+    description: {
+      type: Type.STRING,
+      description:
+        "A 1-2 sentence objective description of what is visible in the photo, for the municipal officer.",
+    },
   },
+  required: ["category", "severity", "confidence", "title", "description"],
 };
 
 function severityLabel(score: number): string {
@@ -64,47 +65,33 @@ export async function classifyIssuePhoto(params: {
   mimeType: string;
   note?: string;
 }): Promise<ClassificationResult> {
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 512,
-    tools: [CLASSIFY_TOOL],
-    tool_choice: { type: "tool", name: "submit_classification" },
-    messages: [
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: [
       {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: params.mimeType as
-                | "image/jpeg"
-                | "image/png"
-                | "image/webp"
-                | "image/gif",
-              data: params.imageBase64,
-            },
-          },
-          {
-            type: "text",
-            text: `You are triaging a citizen-submitted civic issue report for a municipal government system (JanReport). Classify the photo above into exactly one category, and score its severity/urgency for municipal response.${
-              params.note ? `\n\nCitizen's note: "${params.note}"` : ""
-            }\n\nCall submit_classification with your assessment.`,
-          },
-        ],
+        inlineData: {
+          mimeType: params.mimeType,
+          data: params.imageBase64,
+        },
+      },
+      {
+        text: `You are triaging a citizen-submitted civic issue report for a municipal government system (JanReport). Classify the photo above into exactly one category, and score its severity/urgency for municipal response.${
+          params.note ? `\n\nCitizen's note: "${params.note}"` : ""
+        }\n\nRespond with the classification as JSON matching the provided schema.`,
       },
     ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: RESPONSE_SCHEMA,
+    },
   });
 
-  const toolUse = message.content.find(
-    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
-  );
-
-  if (!toolUse) {
+  const text = response.text;
+  if (!text) {
     throw new Error("AI classification did not return a structured result");
   }
 
-  const input = toolUse.input as {
+  const input = JSON.parse(text) as {
     category: IssueCategory;
     severity: number;
     confidence: number;

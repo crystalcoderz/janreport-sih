@@ -56,8 +56,10 @@ export function DashboardClient({
 
   useEffect(() => {
     const supabase = createClient();
+    // Unique per effect invocation — see use-issue-notifications.ts for why
+    // (Strict Mode dev double-invoke + supabase-js channel topic reuse).
     const channel = supabase
-      .channel("dashboard-issues")
+      .channel(`dashboard-issues-${crypto.randomUUID()}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "issues" },

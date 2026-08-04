@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -15,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import type { IssueStatus } from "@/lib/supabase/types";
 import { toast } from "sonner";
+import { Sparkles } from "lucide-react";
 
 const STATUS_OPTIONS: { value: IssueStatus; label: string }[] = [
   { value: "reported", label: "Reported" },
@@ -36,6 +36,26 @@ export function StatusUpdateForm({
   const [note, setNote] = useState("");
   const [resolutionPhoto, setResolutionPhoto] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+
+  async function handleDraftNote() {
+    setDrafting(true);
+    try {
+      const res = await fetch("/api/kimi/draft-note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issueId, targetStatus: status }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Could not draft a note");
+        return;
+      }
+      setNote(data.note);
+    } finally {
+      setDrafting(false);
+    }
+  }
 
   async function handleSubmit() {
     setSubmitting(true);
@@ -43,25 +63,20 @@ export function StatusUpdateForm({
       let resolutionPhotoUrl: string | undefined;
 
       if (status === "resolved" && resolutionPhoto) {
-        const supabase = createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        const ext = resolutionPhoto.type.split("/")[1] || "jpg";
-        const path = `${user!.id}/resolution-${issueId}-${Date.now()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("issue-photos")
-          .upload(path, resolutionPhoto, { contentType: resolutionPhoto.type });
-
-        if (uploadError) {
-          toast.error("Failed to upload resolution photo");
+        const fd = new FormData();
+        fd.set("photo", resolutionPhoto);
+        fd.set("issueId", issueId);
+        const uploadRes = await fetch("/api/uploads/resolution-photo", {
+          method: "POST",
+          body: fd,
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) {
+          toast.error(uploadData.error || "Failed to upload resolution photo");
           setSubmitting(false);
           return;
         }
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("issue-photos").getPublicUrl(path);
-        resolutionPhotoUrl = publicUrl;
+        resolutionPhotoUrl = uploadData.publicUrl;
       }
 
       const res = await fetch(`/api/issues/${issueId}/status`, {
@@ -104,7 +119,19 @@ export function StatusUpdateForm({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="note">Note (optional)</Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="note">Note (optional)</Label>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleDraftNote}
+            disabled={drafting}
+          >
+            <Sparkles className="size-3.5" />
+            {drafting ? "Drafting..." : "Draft with AI"}
+          </Button>
+        </div>
         <Textarea
           id="note"
           value={note}
