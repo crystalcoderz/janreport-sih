@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
-import { MapPin, MapPinOff, MapPinned } from "lucide-react";
+import { MapPin, MapPinOff, MapPinned, BellRing, BellOff } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useGeolocation } from "@/lib/hooks/use-geolocation";
 import { useIssueNotifications, type NearbyAlert } from "@/lib/hooks/use-issue-notifications";
+import { usePushSubscription } from "@/lib/hooks/use-push-subscription";
 import {
   AREA_ALERT_CATEGORIES,
   CATEGORY_LABELS,
@@ -47,6 +48,7 @@ export function AlertsClient({
 }) {
   const { alerts, markAllRead } = useIssueNotifications(userId, initialAlerts);
   const { position, status: geoStatus, error: geoError, locate } = useGeolocation();
+  const { status: pushStatus, subscribe: subscribeToPush } = usePushSubscription();
   const [savedLocation, setSavedLocation] = useState(
     homeLat !== null && homeLng !== null ? { lat: homeLat, lng: homeLng } : null
   );
@@ -196,6 +198,56 @@ export function AlertsClient({
             You&apos;ll be alerted for:{" "}
             {AREA_ALERT_CATEGORIES.map((c) => CATEGORY_LABELS[c]).join(", ")}.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Push notifications</CardTitle>
+          <CardDescription>
+            Get alerted on this device even when JanReport isn&apos;t open in a
+            tab. In-app alerts above always work regardless.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {pushStatus === "subscribed" ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <BellRing className="size-4 text-primary" />
+              Push notifications are on for this device.
+            </p>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="self-start"
+                disabled={pushStatus === "subscribing"}
+                onClick={subscribeToPush}
+              >
+                <BellRing className="size-4" />
+                {pushStatus === "subscribing"
+                  ? "Enabling..."
+                  : "Enable push notifications on this device"}
+              </Button>
+              {pushStatus === "unsupported" && (
+                <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <BellOff className="size-4" />
+                  Push notifications aren&apos;t available in this browser.
+                </p>
+              )}
+              {pushStatus === "denied" && (
+                <p className="text-sm text-destructive">
+                  Notification permission was denied — enable it in your
+                  browser settings to turn this on.
+                </p>
+              )}
+              {pushStatus === "error" && (
+                <p className="text-sm text-destructive">
+                  Could not enable push notifications. Please try again.
+                </p>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 
