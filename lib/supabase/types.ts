@@ -11,6 +11,8 @@ export type IssueStatus =
   | "resolved"
   | "rejected";
 
+export type ResolutionVerdict = "verified" | "not_fixed" | "unclear";
+
 export type VolunteerOfferStatus =
   | "offered"
   | "accepted"
@@ -90,6 +92,10 @@ export interface Database {
           duplicate_of: string | null;
           resolution_photo_url: string | null;
           resolution_note: string | null;
+          resolution_verdict: ResolutionVerdict | null;
+          resolution_verdict_reason: string | null;
+          resolution_verdict_confidence: number | null;
+          resolution_verified_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -112,6 +118,10 @@ export interface Database {
           duplicate_of?: string | null;
           resolution_photo_url?: string | null;
           resolution_note?: string | null;
+          resolution_verdict?: ResolutionVerdict | null;
+          resolution_verdict_reason?: string | null;
+          resolution_verdict_confidence?: number | null;
+          resolution_verified_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

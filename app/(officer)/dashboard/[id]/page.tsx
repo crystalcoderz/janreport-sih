@@ -7,6 +7,7 @@ import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { StatusUpdateForm } from "@/components/dashboard/status-update-form";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
+import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
 import { IssueComments } from "@/components/issue/issue-comments";
 import { IssueVolunteerOffers } from "@/components/issue/issue-volunteer-offers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -105,9 +106,16 @@ export default async function IssueDetailPage({
         {issue.resolution_photo_url && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Resolution photo</CardTitle>
+              <CardTitle className="text-base">Proof of resolution</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-3">
+              {issue.resolution_verdict && (
+                <ResolutionVerdictPanel
+                  verdict={issue.resolution_verdict}
+                  reason={issue.resolution_verdict_reason}
+                  confidence={issue.resolution_verdict_confidence}
+                />
+              )}
               <Image
                 src={issue.resolution_photo_url}
                 alt="Resolution"

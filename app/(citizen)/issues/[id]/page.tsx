@@ -7,6 +7,7 @@ import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
 import { IssueUpvoteButton } from "@/components/citizen/issue-upvote-button";
+import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
 import { IssueComments } from "@/components/issue/issue-comments";
 import { IssueVolunteerOffers } from "@/components/issue/issue-volunteer-offers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -119,17 +120,44 @@ export default async function PublicIssueDetailPage({
       {issue.resolution_photo_url && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Resolution photo</CardTitle>
+            <CardTitle className="text-base">Proof of resolution</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Image
-              src={issue.resolution_photo_url}
-              alt="Resolution"
-              width={800}
-              height={500}
-              unoptimized
-              className="max-h-72 w-full rounded-lg object-cover"
-            />
+          <CardContent className="flex flex-col gap-3">
+            {issue.resolution_verdict && (
+              <ResolutionVerdictPanel
+                verdict={issue.resolution_verdict}
+                reason={issue.resolution_verdict_reason}
+                confidence={issue.resolution_verdict_confidence}
+              />
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <figure className="flex flex-col gap-1.5">
+                <figcaption className="text-xs font-medium text-muted-foreground">
+                  Before — as reported
+                </figcaption>
+                <Image
+                  src={issue.photo_url}
+                  alt="Originally reported issue"
+                  width={800}
+                  height={500}
+                  unoptimized
+                  className="max-h-56 w-full rounded-lg object-cover"
+                />
+              </figure>
+              <figure className="flex flex-col gap-1.5">
+                <figcaption className="text-xs font-medium text-muted-foreground">
+                  After — officer&apos;s proof
+                </figcaption>
+                <Image
+                  src={issue.resolution_photo_url}
+                  alt="Resolution"
+                  width={800}
+                  height={500}
+                  unoptimized
+                  className="max-h-56 w-full rounded-lg object-cover"
+                />
+              </figure>
+            </div>
           </CardContent>
         </Card>
       )}
