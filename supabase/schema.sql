@@ -31,6 +31,11 @@ create type volunteer_offer_status as enum (
   'withdrawn'
 );
 
+-- AI-verified resolution: Gemini compares the officer's resolution photo
+-- against the original report photo, so "resolved" is backed by evidence
+-- rather than being an unverifiable claim.
+create type resolution_verdict as enum ('verified', 'not_fixed', 'unclear');
+
 -- ---------------------------------------------------------------------
 -- Tables
 -- ---------------------------------------------------------------------
@@ -87,6 +92,14 @@ create table issues (
   duplicate_of uuid references issues (id),
   resolution_photo_url text,
   resolution_note text,
+  -- Set by lib/ai/verify-resolution.ts after a resolution photo is
+  -- attached; null means never verified (no photo, or AI unavailable).
+  resolution_verdict resolution_verdict,
+  resolution_verdict_reason text,
+  resolution_verdict_confidence numeric(4, 3)
+    check (resolution_verdict_confidence is null
+           or resolution_verdict_confidence between 0 and 1),
+  resolution_verified_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -217,6 +230,10 @@ create index issues_department_id_idx on issues (department_id);
 create index issues_status_idx on issues (status);
 create index issues_ai_category_idx on issues (ai_category);
 create index issues_created_at_idx on issues (created_at desc);
+-- Admin analytics wants "resolved but AI says otherwise" fast.
+create index issues_resolution_verdict_idx
+  on issues (resolution_verdict)
+  where resolution_verdict is not null;
 create index issue_status_history_issue_id_idx on issue_status_history (issue_id);
 create index profiles_home_location_gix on profiles using gist (home_location)
   where home_location is not null;

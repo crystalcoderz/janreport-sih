@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { IssueTimeline, type TimelineEntry } from "@/components/issue/issue-timeline";
+import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -169,6 +170,13 @@ export function MyReportsClient({
                   </div>
                 </div>
               </div>
+              {issue.resolution_verdict && (
+                <ResolutionVerdictPanel
+                  verdict={issue.resolution_verdict}
+                  reason={issue.resolution_verdict_reason}
+                  confidence={issue.resolution_verdict_confidence}
+                />
+              )}
               <IssueTimeline
                 createdAt={issue.created_at}
                 entries={historyByIssue.get(issue.id) ?? []}
