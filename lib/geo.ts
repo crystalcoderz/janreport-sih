@@ -52,6 +52,72 @@ export async function reverseGeocode(
   return reverseGeocodeNominatim(lat, lng);
 }
 
+export interface GeocodedLocation {
+  lat: number;
+  lng: number;
+  formattedAddress: string;
+}
+
+async function forwardGeocodeGoogle(
+  address: string,
+  apiKey: string
+): Promise<GeocodedLocation | null> {
+  try {
+    // Region-biased to India: citizens type bare local place names
+    // ("gla noida", "sector 62") that are ambiguous or unfindable
+    // globally but resolve fine when the search is anchored to the
+    // country the service operates in.
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&region=in&components=country:IN&key=${apiKey}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data.results?.[0];
+    if (!result) return null;
+    return {
+      lat: result.geometry.location.lat,
+      lng: result.geometry.location.lng,
+      formattedAddress: result.formatted_address,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function forwardGeocodeNominatim(address: string): Promise<GeocodedLocation | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=in&q=${encodeURIComponent(address)}`,
+      { headers: { "Accept-Language": "en", "User-Agent": "JanReport/1.0" } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data[0];
+    if (!result) return null;
+    return { lat: parseFloat(result.lat), lng: parseFloat(result.lon), formattedAddress: result.display_name };
+  } catch {
+    return null;
+  }
+}
+
+// Resolves a free-text address/landmark description to coordinates — the
+// inverse of reverseGeocode above, used when a citizen isn't physically at
+// the issue (reporting from an old photo, GPS unavailable) and describes
+// the location in words instead of sharing it. Same
+// Google-when-configured-else-Nominatim fallback as reverseGeocode.
+export async function forwardGeocode(address: string): Promise<GeocodedLocation | null> {
+  const googleApiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (googleApiKey) {
+    const result = await forwardGeocodeGoogle(address, googleApiKey);
+    if (result) return result;
+  }
+  return forwardGeocodeNominatim(address);
+}
+
+export function googleMapsLink(lat: number, lng: number): string {
+  return `https://www.google.com/maps?q=${lat},${lng}`;
+}
+
 const EARTH_RADIUS_M = 6371000;
 
 export function haversineDistanceMeters(

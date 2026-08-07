@@ -45,7 +45,25 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 });
 
 const DEMO_PASSWORD = "JanReport@2026";
+
+// Where the seeded issues cluster. Defaults to Ranchi (the SIH25031
+// problem statement's city), but override it so demo data lands near
+// wherever the live demo is actually being given — otherwise seeded and
+// live-reported issues sit hundreds of km apart and the map looks broken.
+//   node scripts/seed-demo-issues.mjs --center 28.31,77.52
 const RANCHI_CENTER = { lat: 23.3441, lng: 85.3096 };
+const centerArgIndex = process.argv.indexOf("--center");
+const CENTER =
+  centerArgIndex !== -1 && process.argv[centerArgIndex + 1]
+    ? (([lat, lng]) => ({ lat: Number(lat), lng: Number(lng) }))(
+        process.argv[centerArgIndex + 1].split(",")
+      )
+    : RANCHI_CENTER;
+
+if (Number.isNaN(CENTER.lat) || Number.isNaN(CENTER.lng)) {
+  console.error("Invalid --center value. Expected: --center <lat>,<lng>");
+  process.exit(1);
+}
 
 const DEMO_CITIZENS = [
   "Aarav Kumar",
@@ -82,6 +100,31 @@ function jitter(center, maxKm = 4) {
   const dLat = (Math.random() - 0.5) * 2 * maxKm * degPerKm;
   const dLng = (Math.random() - 0.5) * 2 * maxKm * degPerKm;
   return { lat: center.lat + dLat, lng: center.lng + dLng };
+}
+
+// Same Google-then-Nominatim approach as lib/geo.ts, inlined here since
+// this script runs outside Next's module resolution. Best-effort: a null
+// address is fine, the UI falls back to raw coordinates.
+async function reverseGeocode(lat, lng) {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  try {
+    if (key) {
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${key}`
+      );
+      const data = await res.json();
+      const formatted = data.results?.[0]?.formatted_address;
+      if (formatted) return formatted;
+    }
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18`,
+      { headers: { "Accept-Language": "en", "User-Agent": "JanReport/1.0" } }
+    );
+    const data = await res.json();
+    return data.display_name ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function severityLabel(score) {
@@ -137,7 +180,7 @@ async function main() {
   for (let i = 0; i < SAMPLE_ISSUES.length; i++) {
     const [category, severity, title, description, statusIdx] = SAMPLE_ISSUES[i];
     const reporterId = citizenIds[i % citizenIds.length];
-    const { lat, lng } = jitter(RANCHI_CENTER);
+    const { lat, lng } = jitter(CENTER);
     const department = departments?.find((d) => d.category_keys.includes(category));
     const status = STATUS_FLOW[statusIdx];
     const createdAt = new Date(Date.now() - (SAMPLE_ISSUES.length - i) * 6 * 3_600_000);
@@ -155,7 +198,7 @@ async function main() {
         photo_url: `https://picsum.photos/seed/janreport-${i}/800/600`,
         lat,
         lng,
-        address: "Ranchi, Jharkhand",
+        address: await reverseGeocode(lat, lng),
         department_id: department?.id ?? null,
         status: "reported", // always insert as reported, then walk forward below
         created_at: createdAt.toISOString(),

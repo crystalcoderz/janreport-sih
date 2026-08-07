@@ -1,13 +1,23 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { classifyIssuePhoto } from "@/lib/ai/classify";
-import { reverseGeocode } from "@/lib/geo";
+import { reverseGeocode, forwardGeocode, googleMapsLink } from "@/lib/geo";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { getOrCreateProfileByPhone } from "@/lib/whatsapp/profile";
-import { sendWhatsAppText } from "@/lib/whatsapp/client";
 import { uploadIssuePhoto } from "@/lib/storage";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+const DEDUPE_RADIUS_M = 75;
+
+// Jharkhand's timezone — the app has no other locale/timezone setting, so
+// this keeps "reported at" times readable for citizens instead of UTC.
+function formatIstDateTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata",
+  }).format(new Date(iso));
+}
 
 export async function savePhotoToSession(
   phone: string,
@@ -44,6 +54,43 @@ export async function saveLocationToSession(
   return { ok: true };
 }
 
+// Discards whatever photo/location/note this phone has queued up — the
+// citizen's way to abandon an in-progress report instead of it silently
+// sitting there. Also what unsticks a stale session that's blocking the
+// fresh-conversation greeting on the next "hi".
+export async function clearReportSession(phone: string): Promise<void> {
+  const supabase = createServiceRoleClient();
+  await supabase.from("whatsapp_report_sessions").delete().eq("phone", phone);
+}
+
+// For citizens reporting an issue they're not currently standing at (an
+// older photo, GPS unavailable) — resolves a free-text description to
+// coordinates and stores it exactly like a shared GPS location, so the
+// rest of the flow (dedupe, reverse-geocode-on-file, etc.) doesn't need to
+// know which path produced the location.
+export async function saveAddressToSession(
+  phone: string,
+  address: string
+): Promise<
+  | { ok: true; formattedAddress: string; mapsLink: string }
+  | { ok: false; error: string }
+> {
+  const geocoded = await forwardGeocode(address);
+  if (!geocoded) {
+    return {
+      ok: false,
+      error: "Could not find that location. Try adding more detail — area, landmark, or city.",
+    };
+  }
+  const saved = await saveLocationToSession(phone, geocoded.lat, geocoded.lng);
+  if (!saved.ok) return saved;
+  return {
+    ok: true,
+    formattedAddress: geocoded.formattedAddress,
+    mapsLink: googleMapsLink(geocoded.lat, geocoded.lng),
+  };
+}
+
 export async function saveNoteToSession(phone: string, note: string): Promise<void> {
   const supabase = createServiceRoleClient();
   await supabase.from("whatsapp_report_sessions").upsert({
@@ -53,13 +100,79 @@ export async function saveNoteToSession(phone: string, note: string): Promise<vo
   });
 }
 
-// If the session now has both a photo and a location, classifies + files
-// the report (mirroring the /api/issues web flow) and replies with the
-// result. No-ops if either piece is still missing. Duplicate detection is
-// intentionally skipped here — a back-and-forth "is this a duplicate?"
-// prompt doesn't map cleanly onto a WhatsApp conversation, so every
-// WhatsApp report files as new.
-export async function finalizeReportIfReady(phone: string): Promise<boolean> {
+// What's currently sitting in this phone's in-progress report, so the
+// agent can be told what it still needs instead of guessing.
+// Abandoned sessions (citizen sent a photo, then never came back) would
+// otherwise silently block the "fresh conversation" greeting forever — a
+// session this old is treated as if nothing were in progress, even though
+// the row itself is left alone (cancel_report / a new file_new_report call
+// still overwrites it normally).
+const SESSION_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+export async function getReportSessionState(
+  phone: string
+): Promise<{ hasPhoto: boolean; hasLocation: boolean; hasNote: boolean }> {
+  const supabase = createServiceRoleClient();
+  const { data: session } = await supabase
+    .from("whatsapp_report_sessions")
+    .select("photo_base64, lat, lng, note, updated_at")
+    .eq("phone", phone)
+    .maybeSingle();
+
+  const stale =
+    !!session && Date.now() - new Date(session.updated_at).getTime() > SESSION_STALE_AFTER_MS;
+  if (!session || stale) {
+    return { hasPhoto: false, hasLocation: false, hasNote: false };
+  }
+
+  return {
+    hasPhoto: Boolean(session.photo_base64),
+    hasLocation: session.lat != null && session.lng != null,
+    hasNote: Boolean(session.note),
+  };
+}
+
+export type FinalizeReportResult =
+  | { status: "incomplete"; hasPhoto: boolean; hasLocation: boolean }
+  | {
+      status: "duplicates";
+      category: string;
+      severity: string;
+      duplicates: {
+        id: string;
+        title: string;
+        address: string | null;
+        photoUrl: string;
+        mapsLink: string;
+        reportedAt: string;
+      }[];
+    }
+  | {
+      status: "filed";
+      issue: {
+        id: string;
+        title: string;
+        category: string;
+        severity: string;
+        confidence: number;
+        department: string | null;
+        mapsLink: string;
+      };
+    }
+  | { status: "error"; message: string };
+
+// Classifies + files the report sitting in this phone's session (mirroring
+// the web /api/issues flow, including the dedupe check the old rigid
+// webhook explicitly skipped). Returns a structured result instead of
+// sending a WhatsApp message itself — the calling agent
+// (lib/kimi/tools.ts's file_new_report) composes the actual reply, in
+// whatever language the citizen is using, so there's exactly one place
+// user-facing text comes from instead of this function and the agent
+// both trying to talk to them.
+export async function finalizeReportIfReady(
+  phone: string,
+  options?: { forceNew?: boolean }
+): Promise<FinalizeReportResult> {
   const supabase = createServiceRoleClient();
   const { data: session } = await supabase
     .from("whatsapp_report_sessions")
@@ -67,14 +180,17 @@ export async function finalizeReportIfReady(phone: string): Promise<boolean> {
     .eq("phone", phone)
     .maybeSingle();
 
-  if (!session?.photo_base64 || session.lat === null || session.lng === null) {
-    return false;
+  if (!session || !session.photo_base64 || session.lat === null || session.lng === null) {
+    return {
+      status: "incomplete",
+      hasPhoto: Boolean(session?.photo_base64),
+      hasLocation: session?.lat != null && session?.lng != null,
+    };
   }
 
   const profile = await getOrCreateProfileByPhone(phone);
   if (!profile) {
-    await sendWhatsAppText(phone, "Sorry, something went wrong setting up your account. Please try again.");
-    return true;
+    return { status: "error", message: "Could not set up your account. Please try again." };
   }
 
   let classification;
@@ -86,11 +202,34 @@ export async function finalizeReportIfReady(phone: string): Promise<boolean> {
     });
   } catch (err) {
     console.error("WhatsApp classification failed", err);
-    await sendWhatsAppText(
-      phone,
-      "Sorry, we couldn't process that photo. Please try sending it again."
-    );
-    return true;
+    return { status: "error", message: "Could not process that photo. Please try sending it again." };
+  }
+
+  if (!options?.forceNew) {
+    const { data: nearby, error: nearbyError } = await supabase.rpc("nearby_open_issues", {
+      p_category: classification.category,
+      p_lng: session.lng,
+      p_lat: session.lat,
+      p_radius_m: DEDUPE_RADIUS_M,
+    });
+
+    if (nearbyError) {
+      console.error("WhatsApp dedupe lookup failed", nearbyError);
+    } else if (nearby && nearby.length > 0) {
+      return {
+        status: "duplicates",
+        category: CATEGORY_LABELS[classification.category as IssueCategory] ?? classification.category,
+        severity: classification.severityLabel,
+        duplicates: nearby.map((n) => ({
+          id: n.id,
+          title: n.title,
+          address: n.address,
+          photoUrl: n.photo_url,
+          mapsLink: googleMapsLink(n.lat, n.lng),
+          reportedAt: formatIstDateTime(n.created_at),
+        })),
+      };
+    }
   }
 
   const buffer = Buffer.from(session.photo_base64, "base64");
@@ -107,15 +246,14 @@ export async function finalizeReportIfReady(phone: string): Promise<boolean> {
     }));
   } catch (uploadError) {
     console.error("WhatsApp photo upload failed", uploadError);
-    await sendWhatsAppText(phone, "Sorry, something went wrong saving your photo. Please try again.");
-    return true;
+    return { status: "error", message: "Could not save your photo. Please try again." };
   }
 
   const [address, departmentResult] = await Promise.all([
     reverseGeocode(session.lat, session.lng),
     supabase
       .from("departments")
-      .select("id")
+      .select("id, name")
       .contains("category_keys", [classification.category])
       .limit(1)
       .maybeSingle(),
@@ -144,19 +282,21 @@ export async function finalizeReportIfReady(phone: string): Promise<boolean> {
 
   if (insertError || !issue) {
     console.error("WhatsApp issue insert failed", insertError);
-    await sendWhatsAppText(phone, "Sorry, something went wrong saving your report. Please try again.");
-    return true;
+    return { status: "error", message: "Could not save your report. Please try again." };
   }
 
   await pushNearbyIssueAlerts(issue.id);
 
-  const categoryLabel =
-    CATEGORY_LABELS[classification.category as IssueCategory] ?? classification.category;
-  await sendWhatsAppText(
-    phone,
-    `Report received! 📋\nCategory: ${categoryLabel}\nSeverity: ${classification.severityLabel}\nRouted to: ${
-      issue.departments?.name ?? "the relevant department"
-    }\n\nSign in to JanReport with this WhatsApp number to track it.`
-  );
-  return true;
+  return {
+    status: "filed",
+    issue: {
+      id: issue.id,
+      title: issue.title,
+      category: CATEGORY_LABELS[classification.category as IssueCategory] ?? classification.category,
+      severity: classification.severityLabel,
+      confidence: classification.confidence,
+      department: issue.departments?.name ?? null,
+      mapsLink: googleMapsLink(issue.lat, issue.lng),
+    },
+  };
 }

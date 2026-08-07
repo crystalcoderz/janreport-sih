@@ -8,10 +8,30 @@ export function shadowEmailFor(phone: string): string {
   return `wa-${phone.replace(/\D/g, "")}@whatsapp.janreport.internal`;
 }
 
+// Same as getOrCreateProfileByPhone but skips resolving the account's
+// email. The webhook runs this on every inbound message and only ever
+// needs `id`, so the extra Auth admin round-trip that getUserById costs
+// was pure latency on the hot path.
+export async function getOrCreateProfileIdByPhone(
+  phone: string
+): Promise<string | null> {
+  const admin = createServiceRoleClient();
+
+  const { data: existing } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (existing) return existing.id;
+
+  const profile = await getOrCreateProfileByPhone(phone);
+  return profile?.id ?? null;
+}
+
 // Finds the profile already linked to this WhatsApp number, or provisions
-// a brand-new citizen account for it. Used by both the OTP login route
-// (which then needs `email` to bootstrap a session) and the reporting
-// webhook (which only needs `id` as issues.reporter_id).
+// a brand-new citizen account for it. Used by the OTP login route and the
+// session-link helper, which both need `email` to bootstrap a session.
 export async function getOrCreateProfileByPhone(
   phone: string,
   fullName?: string | null
