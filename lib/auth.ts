@@ -12,11 +12,13 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // Goes through the RPC rather than selecting the table directly:
+  // `authenticated` is only granted the non-sensitive profile columns (so
+  // one citizen can't read another's phone/home location), and this
+  // SECURITY DEFINER function returns the caller's own full row.
   const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single();
+    .rpc("get_my_profile")
+    .maybeSingle();
 
   return profile;
 }

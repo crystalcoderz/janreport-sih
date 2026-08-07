@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
+import { isAllowedPhotoUrl } from "@/lib/storage";
 import type { ResolutionVerdict } from "@/lib/supabase/types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -41,7 +42,15 @@ const RESPONSE_SCHEMA = {
 async function fetchImageAsBase64(
   url: string
 ): Promise<{ data: string; mimeType: string }> {
-  const res = await fetch(url);
+  // Belt-and-braces against SSRF: the status route already rejects photo
+  // URLs off our storage hosts, but this is the function that actually
+  // makes the outbound request, so it re-checks rather than trusting that
+  // every present and future caller validated first.
+  if (!isAllowedPhotoUrl(url)) {
+    throw new Error(`Refusing to fetch image from a non-storage host: ${url}`);
+  }
+
+  const res = await fetch(url, { redirect: "error" });
   if (!res.ok) {
     throw new Error(`Failed to fetch image (${res.status}): ${url}`);
   }

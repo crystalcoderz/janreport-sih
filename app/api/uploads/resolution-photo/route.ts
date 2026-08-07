@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/auth";
-import { uploadIssuePhoto } from "@/lib/storage";
+import {
+  uploadIssuePhoto,
+  ALLOWED_IMAGE_TYPES,
+  looksLikeAllowedImage,
+} from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -25,9 +29,9 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
-  if (!photo.type.startsWith("image/")) {
+  if (!ALLOWED_IMAGE_TYPES.includes(photo.type as (typeof ALLOWED_IMAGE_TYPES)[number])) {
     return NextResponse.json(
-      { error: "Uploaded file must be an image" },
+      { error: "Photo must be a JPEG, PNG, or WebP image" },
       { status: 400 }
     );
   }
@@ -37,6 +41,14 @@ export async function POST(request: NextRequest) {
 
   const supabase = await createClient();
   const buffer = Buffer.from(await photo.arrayBuffer());
+
+  // The declared type is just a client-supplied string; confirm the bytes.
+  if (!looksLikeAllowedImage(buffer)) {
+    return NextResponse.json(
+      { error: "That file doesn't look like a real JPEG, PNG, or WebP image." },
+      { status: 400 }
+    );
+  }
   const ext = photo.type.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
   const path = `${profile.id}/resolution-${issueId}-${Date.now()}.${ext}`;
 

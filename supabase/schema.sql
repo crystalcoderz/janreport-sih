@@ -573,8 +573,15 @@ alter table teams enable row level security;
 
 -- Any signed-in staff member needs to read the crew list to assign work;
 -- only admins curate it.
-create policy "teams_select_authenticated" on teams
-  for select to authenticated using (true);
+-- Crew rosters carry direct contact numbers for municipal field staff and
+-- are only ever rendered on officer screens.
+create policy "teams_select_officer_admin" on teams
+  for select to authenticated using (
+    exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('officer', 'admin')
+    )
+  );
 
 create policy "teams_admin_manage" on teams
   for all to authenticated
@@ -590,6 +597,34 @@ create policy "profiles_select_authenticated" on profiles
 
 create policy "profiles_update_own" on profiles
   for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
+
+-- RLS is row-level only, so the policy above would still expose every
+-- resident's phone number and exact home coordinates to any signed-in
+-- user. Column grants are the missing half: cross-user reads are narrowed
+-- to the display fields the UI actually joins on (profiles(full_name)).
+revoke select on profiles from authenticated;
+grant select (id, full_name, role, department_id, points, created_at)
+  on profiles to authenticated;
+
+revoke update on profiles from authenticated;
+grant update (full_name, home_lat, home_lng, notify_radius_m)
+  on profiles to authenticated;
+
+-- Own profile still needs the full row (home location for geofenced
+-- alerts). SECURITY DEFINER to see the withheld columns, hard-scoped to
+-- auth.uid() so it can never return anyone else's.
+create or replace function get_my_profile()
+returns setof profiles
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select * from profiles where id = auth.uid();
+$$;
+
+revoke all on function get_my_profile() from public, anon;
+grant execute on function get_my_profile() to authenticated;
 
 -- departments: public read-only reference data.
 create policy "departments_select_all" on departments
@@ -630,12 +665,19 @@ create policy "issue_upvotes_delete_own" on issue_upvotes
 create policy "issue_status_history_select_authenticated" on issue_status_history
   for select to authenticated using (true);
 
+-- Department-scoped, matching issues_update_officer_admin — checking only
+-- the actor's role would let any officer write timeline entries onto
+-- another department's issues.
 create policy "issue_status_history_insert_officer_admin" on issue_status_history
   for insert to authenticated with check (
     changed_by = auth.uid()
     and exists (
-      select 1 from profiles p
-      where p.id = auth.uid() and p.role in ('officer', 'admin')
+      select 1
+      from profiles p
+      join issues i on i.id = issue_status_history.issue_id
+      where p.id = auth.uid()
+        and p.role in ('officer', 'admin')
+        and (p.role = 'admin' or p.department_id = i.department_id)
     )
   );
 
