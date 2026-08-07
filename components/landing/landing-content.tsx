@@ -43,7 +43,7 @@ export function LandingContent({
                 />
                 <Button
                   nativeButton={false}
-                  render={<Link href="/signup">{t("landing.getStarted")}</Link>}
+                  render={<Link href="/login">{t("landing.getStarted")}</Link>}
                 />
               </>
             )}

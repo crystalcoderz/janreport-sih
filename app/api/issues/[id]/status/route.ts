@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { verifyResolution } from "@/lib/ai/verify-resolution";
-import type { IssueStatus } from "@/lib/supabase/types";
+import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
+import type { IssueStatus, ResolutionVerdict } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 
@@ -99,5 +100,53 @@ export async function PATCH(
     }
   }
 
+  if (status === "resolved" && isWhatsAppConfigured()) {
+    // Best-effort, never blocks the response — the status update (and the
+    // verdict above) already succeeded regardless of whether this send works.
+    notifyReporterOnWhatsApp(verified).catch((err) => {
+      console.error("Failed to send WhatsApp resolution notice", err);
+    });
+  }
+
   return NextResponse.json({ issue: verified });
+}
+
+async function notifyReporterOnWhatsApp(issue: {
+  id: string;
+  title: string;
+  reporter_id: string;
+  resolution_verdict: ResolutionVerdict | null;
+  resolution_verdict_reason: string | null;
+}) {
+  // Service-role client: the officer's session-scoped client isn't
+  // guaranteed read access to another citizen's profile, and this lookup
+  // is a server-side notification concern, not something the officer needs
+  // visibility into beyond triggering it.
+  const admin = createServiceRoleClient();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("phone")
+    .eq("id", issue.reporter_id)
+    .maybeSingle();
+
+  if (!profile?.phone) return;
+
+  let message: string;
+  if (issue.resolution_verdict === "verified") {
+    message = `✅ Good news — your report "${issue.title}" has been resolved, and our AI check confirms it looks fixed.${
+      issue.resolution_verdict_reason ? ` ${issue.resolution_verdict_reason}` : ""
+    }`;
+  } else if (issue.resolution_verdict === "not_fixed") {
+    message = `⚠️ Your report "${issue.title}" was marked resolved, but our AI check on the department's photo suggests it may not actually be fixed.${
+      issue.resolution_verdict_reason ? ` ${issue.resolution_verdict_reason}` : ""
+    } We've flagged this — reply here if it's still an issue.`;
+  } else {
+    message = `Your report "${issue.title}" has been marked resolved by the department. Check JanReport for details.`;
+  }
+
+  // Free-form text only works inside WhatsApp's 24h customer-service window
+  // (e.g. the citizen messaged the bot recently); outside it this silently
+  // fails to send, same known limitation as OTP delivery without an
+  // approved template (see README).
+  await sendWhatsAppText(profile.phone, message);
 }

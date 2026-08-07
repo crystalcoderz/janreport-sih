@@ -70,6 +70,19 @@ create table profiles (
   created_at timestamptz not null default now()
 );
 
+-- Field crews a department dispatches to an issue. Routing picks the
+-- department; this is the next step down — which crew owns the job.
+create table teams (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  department_id uuid references departments (id) on delete set null,
+  contact_phone text,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index teams_department_id_idx on teams (department_id);
+
 create table issues (
   id uuid primary key default gen_random_uuid(),
   reporter_id uuid not null references profiles (id),
@@ -100,9 +113,13 @@ create table issues (
     check (resolution_verdict_confidence is null
            or resolution_verdict_confidence between 0 and 1),
   resolution_verified_at timestamptz,
+  assigned_team_id uuid references teams (id) on delete set null,
+  assigned_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index issues_assigned_team_id_idx on issues (assigned_team_id);
 
 create table issue_upvotes (
   issue_id uuid not null references issues (id) on delete cascade,
@@ -203,6 +220,17 @@ create table whatsapp_report_sessions (
   note text,
   updated_at timestamptz not null default now()
 );
+
+-- Meta retries a webhook delivery if it isn't acknowledged fast enough.
+-- Claiming the message id here makes handling idempotent, so a retry
+-- can't produce a second reply to the same citizen message.
+create table whatsapp_processed_messages (
+  message_id text primary key,
+  processed_at timestamptz not null default now()
+);
+
+create index whatsapp_processed_messages_processed_at_idx
+  on whatsapp_processed_messages (processed_at);
 
 -- ---------------------------------------------------------------------
 -- Web Push
@@ -540,6 +568,18 @@ alter table issue_volunteer_offers enable row level security;
 -- (anon/authenticated) access outright.
 alter table whatsapp_otp_codes enable row level security;
 alter table whatsapp_report_sessions enable row level security;
+alter table whatsapp_processed_messages enable row level security;
+alter table teams enable row level security;
+
+-- Any signed-in staff member needs to read the crew list to assign work;
+-- only admins curate it.
+create policy "teams_select_authenticated" on teams
+  for select to authenticated using (true);
+
+create policy "teams_admin_manage" on teams
+  for all to authenticated
+  using (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'admin'))
+  with check (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'admin'));
 alter table push_subscriptions enable row level security;
 
 -- profiles: any signed-in user can read profiles (names/roles are not

@@ -35,7 +35,8 @@ export async function kimiChat(
   const completion = await kimi.chat.completions.create({
     model: KIMI_MODEL,
     messages,
-    temperature: options?.temperature ?? 0.6,
+    // kimi-k3 rejects any temperature other than the default (1).
+    temperature: options?.temperature ?? 1,
     max_tokens: options?.maxTokens ?? 800,
   });
 

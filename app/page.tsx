@@ -7,7 +7,7 @@ export default async function Home() {
     ? profile.role === "officer" || profile.role === "admin"
       ? "/dashboard"
       : "/report"
-    : "/signup";
+    : "/login";
 
   return <LandingContent signedIn={Boolean(profile)} primaryHref={primaryHref} />;
 }

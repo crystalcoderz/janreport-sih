@@ -96,6 +96,8 @@ export interface Database {
           resolution_verdict_reason: string | null;
           resolution_verdict_confidence: number | null;
           resolution_verified_at: string | null;
+          assigned_team_id: string | null;
+          assigned_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -122,6 +124,8 @@ export interface Database {
           resolution_verdict_reason?: string | null;
           resolution_verdict_confidence?: number | null;
           resolution_verified_at?: string | null;
+          assigned_team_id?: string | null;
+          assigned_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -146,6 +150,13 @@ export interface Database {
             columns: ["duplicate_of"];
             isOneToOne: false;
             referencedRelation: "issues";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "issues_assigned_team_id_fkey";
+            columns: ["assigned_team_id"];
+            isOneToOne: false;
+            referencedRelation: "teams";
             referencedColumns: ["id"];
           }
         ];
@@ -411,6 +422,40 @@ export interface Database {
         };
         Update: Partial<
           Database["public"]["Tables"]["whatsapp_report_sessions"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      teams: {
+        Row: {
+          id: string;
+          name: string;
+          department_id: string | null;
+          contact_phone: string | null;
+          active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          department_id?: string | null;
+          contact_phone?: string | null;
+          active?: boolean;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["teams"]["Insert"]>;
+        Relationships: [];
+      };
+      whatsapp_processed_messages: {
+        Row: {
+          message_id: string;
+          processed_at: string;
+        };
+        Insert: {
+          message_id: string;
+          processed_at?: string;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["whatsapp_processed_messages"]["Insert"]
         >;
         Relationships: [];
       };

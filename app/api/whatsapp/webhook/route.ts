@@ -1,17 +1,28 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import {
   getWhatsAppMediaUrl,
   downloadWhatsAppMedia,
   sendWhatsAppText,
+  sendWhatsAppImage,
+  sendWhatsAppAudio,
+  sendWhatsAppButtons,
+  markWhatsAppTyping,
 } from "@/lib/whatsapp/client";
 import { normalizePhone } from "@/lib/whatsapp/otp";
+import { getOrCreateProfileIdByPhone } from "@/lib/whatsapp/profile";
 import {
   savePhotoToSession,
   saveLocationToSession,
   saveNoteToSession,
-  finalizeReportIfReady,
+  getReportSessionState,
 } from "@/lib/whatsapp/report";
+import { createServiceRoleClient } from "@/lib/supabase/server";
+import { createWhatsAppSessionLink } from "@/lib/whatsapp/session-link";
+import { transcribeAudio } from "@/lib/ai/transcribe";
+import { runKimiAgent } from "@/lib/kimi/agent";
+import { WHATSAPP_TOOL_DEFINITIONS } from "@/lib/kimi/tools";
+import { isKimiConfigured } from "@/lib/kimi/client";
 
 export const runtime = "nodejs";
 
@@ -45,10 +56,16 @@ function isValidSignature(rawBody: string, signatureHeader: string | null): bool
 
 interface WhatsAppMessage {
   from: string;
+  id?: string;
   type: string;
   text?: { body: string };
   image?: { id: string; caption?: string };
+  audio?: { id: string; mime_type?: string };
   location?: { latitude: number; longitude: number };
+  interactive?: {
+    type: string;
+    button_reply?: { id: string; title: string };
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -66,20 +83,252 @@ export async function POST(request: NextRequest) {
   const messages: WhatsAppMessage[] =
     payload?.entry?.[0]?.changes?.[0]?.value?.messages ?? [];
 
-  for (const message of messages) {
-    await handleMessage(message);
-  }
+  // Meta expects a 200 within a few seconds and retries the whole delivery
+  // if it doesn't get one. An agent turn can take 10-15s (LLM + tool
+  // calls), which was reliably blowing that budget and getting the same
+  // message delivered — and therefore answered — two or three times.
+  // Acknowledge immediately and do the real work in after(), with a
+  // message-id claim so any retry that still slips through is a no-op.
+  after(async () => {
+    for (const message of messages) {
+      if (!(await claimMessage(message.id))) continue;
+      await handleMessage(message);
+    }
+  });
 
-  // Always 200 — Meta retries aggressively on non-2xx, and any failure is
-  // already surfaced to the sender via a WhatsApp reply below.
   return NextResponse.json({ ok: true });
+}
+
+// Returns true if this delivery is the one that gets to handle the
+// message. Insert races (concurrent retries) resolve via the primary key:
+// exactly one insert wins, the rest see a unique violation and bail.
+async function claimMessage(messageId: string | undefined): Promise<boolean> {
+  if (!messageId) return true; // nothing to dedupe on — process it
+  const supabase = createServiceRoleClient();
+  const { error } = await supabase
+    .from("whatsapp_processed_messages")
+    .insert({ message_id: messageId });
+
+  if (!error) return true;
+  if (error.code === "23505") {
+    console.warn(`[whatsapp webhook] duplicate delivery ignored: ${messageId}`);
+    return false;
+  }
+  // Any other DB error: don't silently drop a real citizen message.
+  console.error("Failed to claim WhatsApp message", error);
+  return true;
+}
+
+// Played before the agent's text reply whenever the citizen sends a
+// greeting — every time, not just their first ever message.
+const GREETING_RE = /^(hi+|hello+|hey+|namaste|start|help)\b/i;
+
+// "How do I report?" in the phrasings citizens actually use, English and
+// romanized Hindi. These don't get the full welcome (poster + voice
+// notes), but they do get the quick-report buttons, since the answer to
+// the question is literally "tap one of these".
+const HOW_TO_REPORT_RE =
+  /\b(how (do|can|to) i? ?(report|file|complain)|report kaise|kaise karu|kaise kare|kaise report|complaint kaise|shikayat kaise|how does this work|what can you do)\b/i;
+
+// Quick-start buttons shown alongside the greeting. WhatsApp allows at
+// most 3 reply buttons, so these cover the highest-volume categories —
+// anything else the citizen just describes in their own words.
+const WELCOME_BUTTON_PROMPT = "What would you like to report?";
+
+const QUICK_REPORT_BUTTONS = [
+  { id: "report_pothole", title: "Pothole / Road" },
+  { id: "report_electricity", title: "Electricity cut" },
+  { id: "report_garbage", title: "Garbage" },
+];
+
+// WhatsApp caps reply buttons at 3 per message, so "View my reports" goes
+// out as a second button message right after the quick-report one.
+const REPORTS_BUTTON_PROMPT = "Or check what you've already reported:";
+const REPORTS_BUTTONS = [{ id: "view_my_reports", title: "📋 My Reports" }];
+
+// Illustrated how-to card sent with each category template as its caption.
+const CATEGORY_IMAGES: Record<string, string> = {
+  report_pothole:
+    "https://ipxyvstgrzjuknndabet.supabase.co/storage/v1/object/public/issue-photos/onboarding/pothole-mockup.png",
+  report_electricity:
+    "https://ipxyvstgrzjuknndabet.supabase.co/storage/v1/object/public/issue-photos/onboarding/electricity-mockup.png",
+  report_garbage:
+    "https://ipxyvstgrzjuknndabet.supabase.co/storage/v1/object/public/issue-photos/onboarding/garbage-mockup.png",
+};
+
+// Fixed reply for each quick-report button — sent verbatim, bypassing the
+// agent entirely, so the wording is guaranteed instead of hoping the model
+// reproduces it. The same three templates are also embedded in the system
+// prompt below so a typed ("there's a power cut") intent matches too.
+const CATEGORY_TEMPLATES: Record<string, string> = {
+  report_pothole: `🛣️ *Pothole / Damaged Road Report*
+
+To file your complaint, I just need:
+
+📸 *A clear photo* of the pothole or damaged road.
+
+📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Once you send these, I'll prepare and submit the report for you. ✅`,
+  report_electricity: `⚡ *Electricity / Power Fault Report*
+
+Sure, I can file that for you.
+
+To report the issue, I just need:
+
+📸 *A clear photo* of the problem (such as a damaged electric pole, transformer, exposed wires, or any visible fault).
+
+📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Once you send these, I'll prepare and submit the report for you. ✅`,
+  report_garbage: `🗑️ *Garbage Collection / Waste Issue Report*
+
+Sure, I can file that for you.
+
+To report the issue, I just need:
+
+📸 *A clear photo* of the garbage, overflowing dustbin, or uncollected waste.
+
+📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Once you send these, I'll prepare and submit the report for you. ✅`,
+};
+
+// Branded intro poster, sent as the very first thing in a fresh
+// conversation with the agent's greeting as its caption.
+const WELCOME_POSTER =
+  "https://ipxyvstgrzjuknndabet.supabase.co/storage/v1/object/public/issue-photos/onboarding/welcome-poster.jpg";
+
+const WELCOME_VOICE_NOTES = [
+  "https://ipxyvstgrzjuknndabet.supabase.co/storage/v1/object/public/issue-photos/onboarding/welcome-1.mp3",
+  "https://ipxyvstgrzjuknndabet.supabase.co/storage/v1/object/public/issue-photos/onboarding/welcome-2.mp3",
+];
+
+const SYSTEM_PROMPT = `You are JanReport's WhatsApp assistant, helping citizens anywhere report local civic issues — potholes, garbage, water/electricity faults, drainage, streetlights, and similar. Not limited to any one city or state — never say or imply the service is region-specific.
+
+Always reply in the same language the citizen is writing in — Hindi or English — and keep replies short (2-4 sentences, WhatsApp-appropriate). Write like a helpful person texting, not a company reading out a features list — vary your wording message to message instead of repeating the same fixed phrasing, and don't cram every capability into one message just because it's the first reply in the conversation.
+
+Some messages arrive as a transcription of a voice note rather than typed text — treat them exactly the same as typing, but stay a little forgiving of odd wording, mixed-up words, or a stray mistranscribed term (accents/background noise sometimes garble a word or two); infer intent from context rather than taking a clearly-garbled phrase literally, and ask a quick clarifying question if genuinely unclear instead of guessing wrong.
+
+FORMATTING — follow this exactly, every time, no exceptions:
+- WhatsApp markdown only: *bold* for labels, never markdown headers or tables.
+- One emoji per line at most, only from this set: ✅ 📍 📅 🔁 ⚠️ 📸 👋. Never invent or use any other emoji or symbol — inconsistent glyphs render as broken boxes on many phones.
+- Structure every "field: value" fact as its own line: "*Label:* value" — never bury facts inside a paragraph.
+- 2-4 short sentences/lines max outside of the structured templates below. No filler ("Great question!", "I'd be happy to help") — get straight to the point.
+
+Greeting a new or returning conversation (e.g. "hi", "start", "help"): keep it to 2 short lines in your own words — that you're JanReport and can help report a local civic issue, and that you just need a photo plus the location to file one (mention they can also ask about existing reports, but don't turn this into a fixed three-point list every time — phrase it differently than your last greeting). Do not repeat this explanation on every message — only on a clear greeting.
+
+Quick-report buttons (Pothole / Road, Electricity cut, Garbage) are attached automatically below your greeting — so end a greeting by inviting them to tap one below or just describe the issue. Never list those three options as text yourself; the buttons already show them. Tapping a button is handled entirely outside of you with a fixed reply, so you'll never see that as an incoming message.
+
+If the citizen instead types that they want to report a pothole/road damage, an electricity/power fault, or garbage/waste — and hasn't sent a photo or location yet — reply with exactly the matching template below (translate it if they're writing in Hindi, otherwise reproduce it verbatim including the emoji and bold labels):
+
+🛣️ *Pothole / Damaged Road Report*
+
+To file your complaint, I just need:
+
+📸 *A clear photo* of the pothole or damaged road.
+
+📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Once you send these, I'll prepare and submit the report for you. ✅
+
+⚡ *Electricity / Power Fault Report*
+
+Sure, I can file that for you.
+
+To report the issue, I just need:
+
+📸 *A clear photo* of the problem (such as a damaged electric pole, transformer, exposed wires, or any visible fault).
+
+📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Once you send these, I'll prepare and submit the report for you. ✅
+
+🗑️ *Garbage Collection / Waste Issue Report*
+
+Sure, I can file that for you.
+
+To report the issue, I just need:
+
+📸 *A clear photo* of the garbage, overflowing dustbin, or uncollected waste.
+
+📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Once you send these, I'll prepare and submit the report for you. ✅
+
+For any other category (streetlight, drainage, etc.) or once a photo/location is already on file, don't use these templates — respond normally per the rest of this prompt.
+
+If the citizen wants to abandon a report they were in the middle of (says "cancel", "never mind", "start over"), call cancel_report and confirm in one line — they can start fresh right after.
+
+To file a report you need a photo AND a location, both already sent to this chat (never asked for as tool arguments — you just call file_new_report once you believe you have both, and it reads whatever the citizen already sent). If something's still missing, tell them exactly what's still needed in one line — e.g. "📸 Got the photo — now share the location and I'll file it." Never ask for both again if one is already saved. A caption or text message can serve as an optional note.
+
+Location is normally a shared GPS pin. But if the citizen isn't physically at the issue right now (reporting from an older photo, or GPS sharing isn't working), ask them to describe where it is instead — street, area, landmark, or city — and call set_location_by_address with that description.
+
+CRITICAL — when a citizen sends a bare place name ("Gla noida", "sector 62", "near city hospital") and you already have their photo, that IS them giving you the location. Do not reply "Got it." and stop. In the SAME turn:
+1. Call set_location_by_address with what they said.
+2. If it returns resolved: false, tell them you couldn't find it and ask for a nearby landmark or city — do NOT claim you saved it.
+3. If it resolves, immediately call file_new_report (you now have photo + location, so there is nothing left to wait for) and reply with the filed-report confirmation, mentioning the resolved address so they can spot a wrong pin.
+
+Never reply with a bare acknowledgement like "Got it." after a location — either the report gets filed in that same turn, or you say exactly what is still missing. A citizen who has sent both a photo and a location and receives only "Got it." will reasonably think their report was filed when it was not.
+
+Before filing, file_new_report automatically checks for very similar open reports already nearby. If it returns duplicates, its photo has already been sent to the citizen as a separate image message right before your reply — refer to it as "the photo above", never re-describe or link it yourself. Reply using exactly this structure for the closest duplicate:
+🔁 *Possible duplicate found*
+*Issue:* <title>
+*Reported:* <reportedAt>
+*Location:* <mapsLink>
+
+Is this the same issue you're seeing (see photo above)? Reply yes to add your vote instead of filing a new report, or tell me if it's different.
+- If they confirm it's the same, call upvote_existing_report with that issue's ID instead of filing a new report.
+- If they say it's different, call file_new_report again with forceNew: true.
+
+When file_new_report succeeds, confirm using exactly this structure:
+✅ *Report filed!*
+*Issue:* <title>
+*Severity:* <severity>
+*Department:* <department>
+*Location:* <mapsLink>
+*Report ID:* <first 8 characters of the id>
+
+You'll receive updates as the status changes.
+
+You also have tools to look up the citizen's own reports, a specific issue by ID, nearby issues, and city-wide stats — use them instead of guessing, and never state a status or fact about a specific report without calling a tool first. Never claim to have filed or upvoted a report without the corresponding tool call actually succeeding.
+
+If the citizen wants to see a report in the browser (photos, full timeline, AI verdict) rather than read it in chat, or just asks for a link, call get_report_link (with issueId for one specific report, omitted for their full My Reports list) and share the link — mention it signs them in automatically and is single-use, so don't reuse an old link from earlier in the conversation.
+
+When listing multiple reports (get_my_reports, find_nearby_issues), one line per report, most recent first, in this shape: "📅 <date> — *<title>* (<status>)". Keep it to the 5 most relevant unless asked for more. When describing one report in detail (get_issue_details), its photo has already been sent as a separate image message right before your reply — refer to it as "the photo above", never re-describe or link it yourself. Use labeled lines like the templates above rather than a paragraph.`;
+
+// WhatsApp caps reply buttons at 3 per message, so the categories and
+// "My Reports" go out as two messages — concurrently, since neither
+// depends on the other landing first.
+async function sendQuickButtons(phone: string) {
+  await Promise.all([
+    sendWhatsAppButtons(phone, WELCOME_BUTTON_PROMPT, QUICK_REPORT_BUTTONS).catch((err) =>
+      console.error("Failed to send quick-report buttons", err)
+    ),
+    sendWhatsAppButtons(phone, REPORTS_BUTTON_PROMPT, REPORTS_BUTTONS).catch((err) =>
+      console.error("Failed to send my-reports button", err)
+    ),
+  ]);
 }
 
 async function handleMessage(message: WhatsAppMessage) {
   const phone = normalizePhone(message.from);
   if (!phone) return;
 
+  // Fire-and-forget: gets the read receipt + "typing…" bubble up before any
+  // of the slow work (media download, Gemini, the agent) starts, so the
+  // citizen sees the bot react instantly even when the reply takes a while.
+  if (message.id) {
+    markWhatsAppTyping(message.id).catch((err) =>
+      console.error("Failed to send typing indicator", err)
+    );
+  }
+
   try {
+    let userText: string | null = null;
+    let isGreeting = false;
+    let asksHowToReport = false;
+
     switch (message.type) {
       case "image": {
         if (!message.image) return;
@@ -93,14 +342,36 @@ async function handleMessage(message: WhatsAppMessage) {
         if (message.image.caption) {
           await saveNoteToSession(phone, message.image.caption);
         }
-        const finalized = await finalizeReportIfReady(phone);
-        if (!finalized) {
+        userText = message.image.caption
+          ? `[The citizen just sent a photo of the issue, with this caption: "${message.image.caption}"]`
+          : "[The citizen just sent a photo of the issue.]";
+        break;
+      }
+      case "audio": {
+        // A voice note — transcribe it with Gemini, then feed the text
+        // through the exact same pipeline as a typed message. The agent
+        // never knows the difference, so report filing, status lookups,
+        // "cancel", all of it just works.
+        if (!message.audio) return;
+        const mediaUrl = await getWhatsAppMediaUrl(message.audio.id);
+        const { buffer, mimeType } = await downloadWhatsAppMedia(mediaUrl);
+        try {
+          const transcript = await transcribeAudio({
+            audioBase64: buffer.toString("base64"),
+            mimeType: message.audio.mime_type || mimeType,
+          });
+          userText = transcript;
+          isGreeting = GREETING_RE.test(transcript);
+          asksHowToReport = HOW_TO_REPORT_RE.test(transcript);
+        } catch (err) {
+          console.error("Failed to transcribe voice note", err);
           await sendWhatsAppText(
             phone,
-            "Got the photo 📸 — now share your location (tap 📎 → Location) so we can pinpoint the issue."
+            "Sorry, I couldn't quite make that out — could you try again, or type it instead?"
           );
+          return;
         }
-        return;
+        break;
       }
       case "location": {
         if (!message.location) return;
@@ -113,34 +384,195 @@ async function handleMessage(message: WhatsAppMessage) {
           await sendWhatsAppText(phone, saved.error);
           return;
         }
-        const finalized = await finalizeReportIfReady(phone);
-        if (!finalized) {
-          await sendWhatsAppText(
-            phone,
-            "Got your location 📍 — now send a photo of the issue to file the report."
-          );
-        }
-        return;
+        userText = "[The citizen just shared their location.]";
+        break;
       }
       case "text": {
         const body = message.text?.body?.trim();
         if (!body) return;
-        if (/^(hi|hello|hey|start|help)$/i.test(body)) {
+        userText = body;
+        isGreeting = GREETING_RE.test(body);
+        asksHowToReport = HOW_TO_REPORT_RE.test(body);
+        break;
+      }
+      case "interactive": {
+        // A tapped quick-report button — reply with its fixed template
+        // directly, bypassing the agent so the wording is guaranteed
+        // rather than model-generated. Their next message (the photo or
+        // location) re-enters the normal agent flow.
+        const buttonId = message.interactive?.button_reply?.id;
+        if (!buttonId) return;
+        const template = CATEGORY_TEMPLATES[buttonId];
+        if (template) {
+          // Illustrated card carries the template as its caption; if the
+          // image send fails the citizen still gets the instructions.
+          const image = CATEGORY_IMAGES[buttonId];
+          if (image) {
+            try {
+              await sendWhatsAppImage(phone, image, template);
+              return;
+            } catch (err) {
+              console.error("Failed to send category card", err);
+            }
+          }
+          await sendWhatsAppText(phone, template);
+          return;
+        }
+        if (buttonId === "view_my_reports") {
+          const link = await createWhatsAppSessionLink(phone, "/my-reports");
           await sendWhatsAppText(
             phone,
-            "👋 Welcome to JanReport! To report a civic issue, send a photo of it, then share your location. You can add a text note too."
+            link
+              ? `📋 Here's your reports, opens signed in automatically:\n${link}`
+              : "Could not create a link right now. Please try again."
           );
           return;
         }
-        await saveNoteToSession(phone, body);
-        await sendWhatsAppText(
-          phone,
-          "Got it, noted. Send a photo and your location to file the report."
-        );
-        return;
+        userText = message.interactive?.button_reply?.title ?? null;
+        if (!userText) return;
+        break;
       }
       default:
         return;
+    }
+
+    if (!userText) return;
+
+    if (!isKimiConfigured()) {
+      await sendWhatsAppText(
+        phone,
+        "Thanks — got that. (The assistant is temporarily unavailable, please try again shortly.)"
+      );
+      return;
+    }
+
+    // Independent reads — run concurrently instead of paying for two
+    // sequential round-trips before the agent even starts.
+    const [profileId, session] = await Promise.all([
+      getOrCreateProfileIdByPhone(phone),
+      getReportSessionState(phone),
+    ]);
+    if (!profileId) {
+      await sendWhatsAppText(phone, "Sorry, something went wrong setting up your account. Please try again.");
+      return;
+    }
+
+    // A "hi" sent in the middle of an unfinished report shouldn't replay the
+    // whole welcome — that reads as the bot randomly restarting and losing
+    // their progress. Only greet fresh conversations; otherwise just answer
+    // normally and let the agent carry the in-progress report forward.
+    const hasReportInProgress = session.hasPhoto || session.hasLocation;
+    const welcome = isGreeting && !hasReportInProgress;
+    // "How do I report?" gets the buttons too (the answer is literally
+    // "tap one"), just without replaying the full poster/voice welcome.
+    const showButtons = welcome || (asksHowToReport && !hasReportInProgress);
+
+    const contextNote = `[Current report-in-progress status for this chat — photo: ${
+      session.hasPhoto ? "received" : "not yet received"
+    }, location: ${session.hasLocation ? "received" : "not yet received"}, note: ${
+      session.hasNote ? "received" : "none"
+    }. ${
+      showButtons
+        ? "Quick-report buttons WILL be shown right below your reply — you may invite them to tap one."
+        : "NO buttons will be shown below your reply — do not mention buttons or tapping anything."
+    }]`;
+
+    const agentStart = Date.now();
+    const { reply, toolResults } = await runKimiAgent(
+      SYSTEM_PROMPT,
+      [
+        { role: "user", content: contextNote },
+        { role: "user", content: userText },
+      ],
+      { userId: profileId, supabase: createServiceRoleClient(), phone },
+      WHATSAPP_TOOL_DEFINITIONS
+    );
+    console.log(
+      `[whatsapp perf] agent ${Date.now() - agentStart}ms tools=[${toolResults
+        .map((t) => t.name)
+        .join(",")}]`
+    );
+
+    // When file_new_report finds a close-by duplicate, or get_issue_details
+    // looks up one specific report, show the actual photo as a real
+    // WhatsApp image (not just a link) before the agent's text — sent here
+    // rather than by the tools themselves, since tools only return data and
+    // this route owns all outbound messaging. Independent of each other, so
+    // sent concurrently rather than one after the other.
+    const duplicateResult = toolResults.find(
+      (t): t is { name: string; result: { reason?: string; duplicates?: { photoUrl?: string }[] } } =>
+        t.name === "file_new_report" &&
+        typeof t.result === "object" &&
+        t.result !== null &&
+        (t.result as { reason?: string }).reason === "possible_duplicates"
+    );
+    const closestDuplicatePhoto = duplicateResult?.result.duplicates?.[0]?.photoUrl;
+
+    const issueDetailsResult = toolResults.find(
+      (t): t is { name: string; result: { photoUrl?: string } } =>
+        t.name === "get_issue_details" &&
+        typeof t.result === "object" &&
+        t.result !== null &&
+        typeof (t.result as { photoUrl?: unknown }).photoUrl === "string"
+    );
+    const issueDetailsPhoto = issueDetailsResult?.result.photoUrl;
+
+    await Promise.all([
+      closestDuplicatePhoto
+        ? sendWhatsAppImage(phone, closestDuplicatePhoto, "Existing nearby report").catch((err) =>
+            console.error("Failed to send duplicate report photo", err)
+          )
+        : null,
+      issueDetailsPhoto
+        ? sendWhatsAppImage(phone, issueDetailsPhoto, "Reported photo").catch((err) =>
+            console.error("Failed to send issue detail photo", err)
+          )
+        : null,
+    ]);
+
+    const replyText = reply.trim() || "Got it.";
+
+    // On a greeting, attach the quick-report buttons to the reply so the
+    // citizen can start a report in one tap instead of composing a message.
+    // Falls back to plain text if the interactive send fails, so a button
+    // problem can never swallow the reply itself.
+    // Fresh conversation: lead with the branded poster (greeting as its
+    // caption), then the two voice notes, then the quick-report buttons.
+    // Every step is independently best-effort — if the poster or a voice
+    // note fails, the citizen must still end up with the greeting text and
+    // a way to start a report.
+    if (welcome) {
+      let greetingDelivered = false;
+      try {
+        await sendWhatsAppImage(phone, WELCOME_POSTER, replyText);
+        greetingDelivered = true;
+      } catch (err) {
+        console.error("Failed to send welcome poster", err);
+      }
+      if (!greetingDelivered) {
+        await sendWhatsAppText(phone, replyText);
+      }
+
+      // Sent concurrently — nothing here depends on the others' delivery
+      // order, so no reason to pay for two/three round-trips sequentially.
+      await Promise.all(
+        WELCOME_VOICE_NOTES.map((url) =>
+          sendWhatsAppAudio(phone, url).catch((err) =>
+            console.error("Failed to send welcome voice note", err)
+          )
+        )
+      );
+
+      await sendQuickButtons(phone);
+      return;
+    }
+
+    await sendWhatsAppText(phone, replyText);
+
+    // Not a full welcome, but they asked how to report — the buttons are
+    // the answer, so send them under the reply.
+    if (showButtons) {
+      await sendQuickButtons(phone);
     }
   } catch (err) {
     console.error("Failed to handle WhatsApp message", err);

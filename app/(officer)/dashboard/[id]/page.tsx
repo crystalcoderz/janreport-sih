@@ -3,9 +3,12 @@ import Image from "next/image";
 import { formatDistanceToNow } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
+import { googleMapsLink } from "@/lib/geo";
 import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { StatusUpdateForm } from "@/components/dashboard/status-update-form";
+import { AssignTeamForm } from "@/components/dashboard/assign-team-form";
+import { IssueLocationMap } from "@/components/map/issue-location-map";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
 import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
 import { IssueComments } from "@/components/issue/issue-comments";
@@ -32,7 +35,9 @@ export default async function IssueDetailPage({
   ] = await Promise.all([
     supabase
       .from("issues")
-      .select("*, departments(name), profiles!issues_reporter_id_fkey(full_name)")
+      .select(
+        "*, departments(name), teams(id, name, contact_phone), profiles!issues_reporter_id_fkey(full_name)"
+      )
       .eq("id", id)
       .single(),
     supabase
@@ -56,6 +61,22 @@ export default async function IssueDetailPage({
   ]);
 
   if (!issue) notFound();
+
+  // Crews for this issue's department (plus any unassigned-to-a-department
+  // crews, which can be dispatched anywhere).
+  const { data: teams } = await supabase
+    .from("teams")
+    .select("id, name, contact_phone, department_id")
+    .eq("active", true)
+    .order("name");
+
+  const eligibleTeams = (teams ?? []).filter(
+    (t) => !t.department_id || t.department_id === issue.department_id
+  );
+
+  const assignedTeam = (
+    issue as { teams?: { id: string; name: string; contact_phone: string | null } | null }
+  ).teams;
 
   return (
     <div className="mx-auto grid max-w-4xl gap-6 lg:grid-cols-5">
@@ -85,10 +106,15 @@ export default async function IssueDetailPage({
           <p className="mt-1 text-muted-foreground">{issue.description}</p>
         </div>
         <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-          <span className="flex items-center gap-1.5">
+          <a
+            href={googleMapsLink(issue.lat, issue.lng)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 hover:underline"
+          >
             <MapPin className="size-4" />
             {issue.address ?? `${issue.lat.toFixed(5)}, ${issue.lng.toFixed(5)}`}
-          </span>
+          </a>
           <span className="flex items-center gap-1.5">
             <User className="size-4" />
             Reported by{" "}
@@ -102,6 +128,10 @@ export default async function IssueDetailPage({
           <span>Routed to {issue.departments?.name ?? "Unassigned"}</span>
           <span>{Math.round(issue.ai_confidence * 100)}% AI confidence</span>
         </div>
+
+        <Card className="overflow-hidden py-0">
+          <IssueLocationMap issue={issue} />
+        </Card>
 
         {issue.resolution_photo_url && (
           <Card>
@@ -130,6 +160,22 @@ export default async function IssueDetailPage({
       </div>
 
       <div className="flex flex-col gap-4 lg:col-span-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Assigned crew</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AssignTeamForm
+              issueId={issue.id}
+              teams={eligibleTeams}
+              currentTeamId={issue.assigned_team_id}
+              currentTeamName={assignedTeam?.name}
+              currentTeamPhone={assignedTeam?.contact_phone}
+              assignedAt={issue.assigned_at}
+            />
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Update status</CardTitle>

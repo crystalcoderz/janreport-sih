@@ -14,7 +14,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { CATEGORY_LABELS, ISSUE_CATEGORIES, severityColor } from "@/lib/departments";
+import {
+  CATEGORY_LABELS,
+  ISSUE_CATEGORIES,
+  severityColor,
+  type IssueCategory,
+} from "@/lib/departments";
 import type { Database } from "@/lib/supabase/types";
 import { ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
@@ -80,7 +85,13 @@ export function MapPageClient({
       <div className="flex flex-wrap items-center gap-3">
         <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v ?? "all")}>
           <SelectTrigger className="w-56">
-            <SelectValue />
+            <SelectValue>
+              {(v) =>
+                v === "all"
+                  ? "All categories"
+                  : (CATEGORY_LABELS[v as IssueCategory] ?? v)
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All categories</SelectItem>

@@ -166,7 +166,12 @@ export function AlertsClient({
             <Label>Alert radius</Label>
             <Select value={radius} onValueChange={(v) => v && saveRadiusOnly(v)}>
               <SelectTrigger className="w-48">
-                <SelectValue />
+                <SelectValue>
+                  {(v) => {
+                    const m = Number(v);
+                    return m >= 1000 ? `${m / 1000} km` : `${m} m`;
+                  }}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {RADIUS_OPTIONS.map((m) => (
