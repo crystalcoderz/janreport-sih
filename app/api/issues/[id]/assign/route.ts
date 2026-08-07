@@ -25,6 +25,38 @@ export async function PATCH(
   const teamId: string | null =
     typeof body?.teamId === "string" && body.teamId ? body.teamId : null;
 
+  // Validate the crew before writing it. RLS decides *whether* this officer
+  // may touch the issue, but not *what* they may put in the column — without
+  // this an officer could dispatch any team id, including an inactive crew or
+  // one belonging to another department.
+  if (teamId) {
+    const { data: target } = await supabase
+      .from("issues")
+      .select("department_id")
+      .eq("id", id)
+      .single();
+
+    const { data: team } = await supabase
+      .from("teams")
+      .select("id, department_id, active")
+      .eq("id", teamId)
+      .maybeSingle();
+
+    if (!team || !team.active) {
+      return NextResponse.json(
+        { error: "That crew doesn't exist or is no longer active." },
+        { status: 400 }
+      );
+    }
+    // A crew with no department is a general-purpose unit and may go anywhere.
+    if (team.department_id && team.department_id !== target?.department_id) {
+      return NextResponse.json(
+        { error: "That crew belongs to a different department." },
+        { status: 400 }
+      );
+    }
+  }
+
   const { data: issue, error } = await supabase
     .from("issues")
     .update({

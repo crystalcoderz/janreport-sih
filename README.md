@@ -95,8 +95,8 @@ citizen help chatbot, and an officer resolution-note drafting assistant.
 4. Update its status on the officer screen (Acknowledged -> In Progress -> Resolved,
    optionally attaching a resolution photo).
 5. Watch the citizen's `/my-reports` timeline update live to match.
-6. Show `/map` for the live severity map + heatmap, and `/leaderboard` /
-   `/analytics` (admin) for the gamification and city-wide stats differentiators.
+6. Show `/map` for the live severity map + heatmap, and `/analytics` (admin)
+   for the city-wide stats differentiator.
    On `/analytics`, click "Generate briefing" for the AI City Briefing (Kimi).
 7. Geofenced alerts: on a second citizen account, visit `/alerts` and save the
    current location as the alert location (radius defaults to 100m). Submit a
@@ -159,9 +159,10 @@ simply has nothing to call it.
   photo, then a location (as two separate WhatsApp messages); the webhook
   holds the in-progress report in `whatsapp_report_sessions` until both
   arrive, then runs the same AI classification + department routing as the
-  web `/report` flow and replies with the result. Duplicate detection is
-  skipped for WhatsApp reports (the "is this a duplicate?" back-and-forth
-  doesn't map well onto a chat), so every WhatsApp report files as new.
+  web `/report` flow and replies with the result. Duplicate detection runs
+  on WhatsApp too: before filing, the bot checks for a nearby open report in
+  the same category and — if it finds one — shows its photo and asks whether
+  it's the same issue, upvoting instead of filing a duplicate when confirmed.
 
 ## AI features (Kimi)
 

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { verifyResolution } from "@/lib/ai/verify-resolution";
 import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
+import { isAllowedPhotoUrl } from "@/lib/storage";
 import type { IssueStatus, ResolutionVerdict } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -35,6 +36,15 @@ export async function PATCH(
 
   if (!status || !VALID_STATUSES.includes(status)) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+  }
+
+  // This URL is client-supplied and gets fetched server-side later for AI
+  // verification, so it has to be pinned to our own storage hosts.
+  if (resolutionPhotoUrl && !isAllowedPhotoUrl(resolutionPhotoUrl)) {
+    return NextResponse.json(
+      { error: "Resolution photo must be uploaded through JanReport." },
+      { status: 400 }
+    );
   }
 
   // RLS (issues_update_officer_admin) enforces that only an officer for

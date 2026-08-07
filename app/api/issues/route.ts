@@ -3,7 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import { classifyIssuePhoto } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
-import { uploadIssuePhoto } from "@/lib/storage";
+import {
+  uploadIssuePhoto,
+  ALLOWED_IMAGE_TYPES,
+  looksLikeAllowedImage,
+} from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -30,9 +34,9 @@ export async function POST(request: NextRequest) {
   if (!(photo instanceof File)) {
     return NextResponse.json({ error: "Photo is required" }, { status: 400 });
   }
-  if (!photo.type.startsWith("image/")) {
+  if (!ALLOWED_IMAGE_TYPES.includes(photo.type as (typeof ALLOWED_IMAGE_TYPES)[number])) {
     return NextResponse.json(
-      { error: "Uploaded file must be an image" },
+      { error: "Photo must be a JPEG, PNG, or WebP image" },
       { status: 400 }
     );
   }
@@ -57,6 +61,14 @@ export async function POST(request: NextRequest) {
   }
 
   const buffer = Buffer.from(await photo.arrayBuffer());
+
+  // The declared type is just a client-supplied string; confirm the bytes.
+  if (!looksLikeAllowedImage(buffer)) {
+    return NextResponse.json(
+      { error: "That file doesn't look like a real JPEG, PNG, or WebP image." },
+      { status: 400 }
+    );
+  }
 
   let classification;
   try {

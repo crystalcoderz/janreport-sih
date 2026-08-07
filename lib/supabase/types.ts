@@ -501,6 +501,10 @@ export interface Database {
         };
         Returns: Database["public"]["Tables"]["issues"]["Row"][];
       };
+      get_my_profile: {
+        Args: Record<string, never>;
+        Returns: Database["public"]["Tables"]["profiles"]["Row"][];
+      };
     };
   };
 }
