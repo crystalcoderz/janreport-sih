@@ -65,7 +65,26 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "upvotes", label: "Most upvoted" },
 ];
 
-type QuickFilter = "all" | "open" | "critical" | "overdue" | "unassigned" | "resolved";
+type QuickFilter =
+  | "all"
+  | "open"
+  | "critical"
+  | "overdue"
+  | "unassigned"
+  | "pendingAck"
+  | "resolved";
+
+// An issue still needs its formal acknowledgement letter as long as it
+// hasn't been sent and the report isn't past the point where sending one
+// still makes sense — once resolved or rejected, "we've received your
+// report" is moot.
+function needsAcknowledgement(issue: Issue): boolean {
+  return (
+    !issue.acknowledgement_sent_at &&
+    issue.status !== "resolved" &&
+    issue.status !== "rejected"
+  );
+}
 
 export function DashboardClient({
   initialIssues,
@@ -143,7 +162,8 @@ export function DashboardClient({
     const unassigned = scoped.filter(
       (i) => !i.assigned_team_id && i.status !== "resolved" && i.status !== "rejected"
     ).length;
-    return { open, critical, resolved, overdue, unassigned, total: scoped.length };
+    const pendingAck = scoped.filter(needsAcknowledgement).length;
+    return { open, critical, resolved, overdue, unassigned, pendingAck, total: scoped.length };
   }, [scoped]);
 
   const filtered = useMemo(() => {
@@ -164,6 +184,7 @@ export function DashboardClient({
       )
         return false;
       if (quickFilter === "resolved" && issue.status !== "resolved") return false;
+      if (quickFilter === "pendingAck" && !needsAcknowledgement(issue)) return false;
       if (q) {
         const haystack = `${issue.title} ${issue.address ?? ""} ${
           issue.departments?.name ?? ""
@@ -279,7 +300,7 @@ export function DashboardClient({
       </div>
 
       {/* Stat tiles */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
         <StatTile
           label="Total reports"
           value={stats.total}
@@ -318,6 +339,14 @@ export function DashboardClient({
           tone="info"
           active={quickFilter === "unassigned"}
           onClick={() => toggleQuick("unassigned")}
+        />
+        <StatTile
+          label="Pending ack."
+          value={stats.pendingAck}
+          icon={FileCheck2}
+          tone="warning"
+          active={quickFilter === "pendingAck"}
+          onClick={() => toggleQuick("pendingAck")}
         />
         <StatTile
           label="Resolved"
@@ -578,7 +607,7 @@ function IssueRow({ issue }: { issue: Issue }) {
               {issue.title}
             </p>
             <StatusBadge status={issue.status} />
-            {issue.status === "reported" && !issue.acknowledgement_sent_at && (
+            {needsAcknowledgement(issue) && (
               <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">
                 <FileCheck2 className="size-3" />
                 Pending acknowledgement
