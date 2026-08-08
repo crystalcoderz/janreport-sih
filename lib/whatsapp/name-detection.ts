@@ -29,6 +29,35 @@ const NAME_CAPTURE_RE =
 const CAPITALIZED_INTRO_RE =
   /\b(?:[Ii]\s?am|[Ii]'m)\s+([A-Z][a-zA-Z.'-]*(?:\s+[A-Z][a-zA-Z.'-]*){0,3})\b/;
 
+// Words that structurally look like a name capture but aren't one:
+// - After "I'm"/"I am": that phrase almost always opens a sentence, and
+//   phone keyboards auto-capitalize a sentence's first word regardless of
+//   what it is — "I'm Facing an issue" or "I am Sorry for the delay"
+//   capitalizes exactly like a real name would ("I'm Rohit").
+// - After "my name is"/"mera naam": a citizen declining to give their name
+//   ("my name is not important", "mera naam nahi bataunga" — "I won't tell
+//   my name") grammatically fits the same slot a real name would.
+// Neither regex can tell these apart structurally, so reject the specific
+// non-name words that actually show up in this slot in practice.
+const NON_NAME_FIRST_WORDS = new Set([
+  "facing", "having", "trying", "going", "not", "still", "also", "just",
+  "currently", "dealing", "experiencing", "seeing", "noticing", "writing",
+  "reporting", "sending", "sharing", "calling", "living", "staying",
+  "working", "looking", "wondering", "asking", "extremely", "really",
+  "very", "quite", "so", "here", "there", "back", "again", "fine", "good",
+  "okay", "ok", "sorry", "glad", "happy", "sad", "upset", "worried",
+  "frustrated", "angry", "tired", "done", "new", "old", "sure", "unable",
+  "unsure", "afraid", "confused", "concerned", "attaching", "uploading",
+  "private", "secret", "unknown", "irrelevant", "unimportant",
+  // romanized Hindi
+  "nahi", "nahin", "mat", "bhi", "kya", "kaun", "kyun", "kyu", "pucho",
+  "batana", "bataunga", "bataungi",
+]);
+
+function firstWordIsNonName(raw: string): boolean {
+  return NON_NAME_FIRST_WORDS.has(raw.split(/\s+/)[0].toLowerCase());
+}
+
 function matchAfterAnchor(text: string): string | null {
   const anchor = text.match(NAME_ANCHOR_RE);
   if (!anchor || anchor.index === undefined) return null;
@@ -39,7 +68,7 @@ function matchAfterAnchor(text: string): string | null {
 
 export function extractStatedName(text: string): string | null {
   const raw = matchAfterAnchor(text) ?? text.match(CAPITALIZED_INTRO_RE)?.[1] ?? null;
-  if (!raw) return null;
+  if (!raw || firstWordIsNonName(raw)) return null;
   const name = raw.replace(/\b(hai|please)\b/gi, "").trim();
   if (name.length < 2 || name.length > 60) return null;
   return name;
