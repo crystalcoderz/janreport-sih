@@ -5,7 +5,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { formatDistanceToNow } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
-import { CATEGORY_LABELS, severityColor, type IssueCategory } from "@/lib/departments";
+import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
+import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { LazyIssueMap } from "@/components/map/lazy-issue-map";
 import { isOverdue, hoursOverdue } from "@/lib/sla";
@@ -266,43 +267,46 @@ export function DashboardClient({
     search !== "" || quickFilter !== "all" || statusFilter !== "all";
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-3xl font-bold tracking-tight">Officer Dashboard</h1>
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/60 pb-5">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[11px] font-medium tracking-[0.2em] text-muted-foreground uppercase">
+              JanReport / Ops
+            </span>
             <span
-              className={
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium " +
-                (live
-                  ? "bg-green-500/10 text-green-700 dark:text-green-400"
-                  : "bg-muted text-muted-foreground")
-              }
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wide uppercase",
+                live
+                  ? "border-emerald-500/30 text-emerald-400"
+                  : "border-border text-muted-foreground"
+              )}
             >
               <span
-                className={
-                  "size-1.5 rounded-full " +
-                  (live ? "animate-pulse bg-green-500" : "bg-muted-foreground/50")
-                }
+                className={cn(
+                  "size-1.5 rounded-full",
+                  live ? "animate-pulse bg-emerald-400 shadow-[0_0_6px_theme(colors.emerald.400)]" : "bg-muted-foreground/50"
+                )}
               />
               {live ? "Live" : "Connecting"}
             </span>
           </div>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight">Officer Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
             Every citizen report, prioritised by urgency and SLA breach.
           </p>
         </div>
-        <Button variant="outline" onClick={exportCsv} className="shadow-sm">
+        <Button variant="outline" onClick={exportCsv}>
           <Download className="size-4" />
           Export CSV
         </Button>
       </div>
 
-      {/* Stat tiles */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+      {/* Stat readout strip */}
+      <div className="flex flex-wrap overflow-hidden rounded-lg border border-border/60 bg-card/40">
         <StatTile
-          label="Total reports"
+          label="Total"
           value={stats.total}
           icon={Inbox}
           active={quickFilter === "all"}
@@ -359,7 +363,7 @@ export function DashboardClient({
       </div>
 
       {/* Toolbar */}
-      <div className="rounded-xl border bg-card p-3 shadow-sm">
+      <div className="rounded-lg border border-border/60 bg-card/30 p-2.5">
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="relative min-w-64 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -367,7 +371,7 @@ export function DashboardClient({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by title, address, department…"
-              className="h-10 border-0 bg-muted/50 pl-9 focus-visible:bg-background"
+              className="h-10 border-0 bg-background/60 pl-9 focus-visible:bg-background"
             />
           </div>
 
@@ -460,7 +464,7 @@ export function DashboardClient({
         </TabsContent>
 
         <TabsContent value="map">
-          <div className="overflow-hidden rounded-xl border shadow-sm">
+          <div className="overflow-hidden rounded-lg border border-border/60">
             <LazyIssueMap
               issues={filtered}
               renderPopup={(issue) => (
@@ -483,25 +487,16 @@ export function DashboardClient({
 }
 
 const TONE_STYLES = {
-  neutral: { icon: "text-slate-600 dark:text-slate-300", chip: "bg-slate-500/10", value: "" },
-  info: { icon: "text-blue-600 dark:text-blue-400", chip: "bg-blue-500/10", value: "" },
-  critical: {
-    icon: "text-red-600 dark:text-red-400",
-    chip: "bg-red-500/10",
-    value: "text-red-600 dark:text-red-400",
-  },
-  warning: {
-    icon: "text-amber-600 dark:text-amber-400",
-    chip: "bg-amber-500/10",
-    value: "text-amber-600 dark:text-amber-400",
-  },
-  good: {
-    icon: "text-green-600 dark:text-green-400",
-    chip: "bg-green-500/10",
-    value: "text-green-600 dark:text-green-400",
-  },
+  neutral: { icon: "text-slate-400", value: "text-foreground", bar: "bg-slate-400" },
+  info: { icon: "text-sky-400", value: "text-sky-400", bar: "bg-sky-400" },
+  critical: { icon: "text-red-400", value: "text-red-400", bar: "bg-red-400" },
+  warning: { icon: "text-amber-400", value: "text-amber-400", bar: "bg-amber-400" },
+  good: { icon: "text-emerald-400", value: "text-emerald-400", bar: "bg-emerald-400" },
 } as const;
 
+// A single readout strip divided into segments rather than a grid of
+// separate icon-chip cards — closer to a systems-status panel than a
+// stack of dashboard widgets.
 function StatTile({
   label,
   value,
@@ -522,26 +517,23 @@ function StatTile({
     <button
       type="button"
       onClick={onClick}
-      className={
-        "group relative overflow-hidden rounded-xl border bg-card p-5 text-left shadow-sm transition-all " +
-        "hover:-translate-y-0.5 hover:shadow-md " +
-        (active ? "border-primary/60 ring-2 ring-primary/20" : "hover:border-primary/30")
-      }
+      className={cn(
+        "relative min-w-[7.5rem] flex-1 border-r border-b-2 border-border/60 px-4 py-3.5 text-left transition-colors last:border-r-0",
+        active ? "bg-white/[0.04]" : "border-b-transparent hover:bg-white/[0.02]"
+      )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className={"flex size-10 items-center justify-center rounded-lg " + s.chip}>
-          <Icon className={"size-5 " + s.icon} />
-        </div>
-        {active && (
-          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-primary uppercase">
-            Filtered
-          </span>
-        )}
+      {active && (
+        <span className={cn("absolute inset-x-0 bottom-0 h-0.5", s.bar)} aria-hidden />
+      )}
+      <div className="flex items-center gap-1.5">
+        <Icon className={cn("size-3.5", s.icon)} />
+        <span className="font-mono text-[10px] font-medium tracking-[0.1em] text-muted-foreground uppercase">
+          {label}
+        </span>
       </div>
-      <p className={"mt-4 text-4xl font-bold tracking-tight tabular-nums " + s.value}>
+      <p className={cn("mt-1.5 font-mono text-3xl font-semibold tabular-nums", active ? s.value : "text-foreground")}>
         {value}
       </p>
-      <p className="mt-1 text-sm text-muted-foreground">{label}</p>
     </button>
   );
 }
@@ -577,14 +569,28 @@ function EmptyState({
   );
 }
 
+// Brighter than lib/departments.ts's severityColor() on purpose — that
+// function is tuned for light citizen-facing surfaces (the public map),
+// this row only ever renders on the forced-dark ops console, where the
+// deeper 600-range shades read as muddy rather than as a clear signal.
+function severityAccent(score: number): string {
+  if (score >= 9) return "#f87171"; // red-400
+  if (score >= 7) return "#fb923c"; // orange-400
+  if (score >= 5) return "#fbbf24"; // amber-400
+  return "#4ade80"; // green-400
+}
+
+const TAG_STYLES =
+  "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wide uppercase";
+
 function IssueRow({ issue }: { issue: Issue }) {
   const overdue = isOverdue(issue);
   const overdueBy = hoursOverdue(issue);
-  const accent = severityColor(issue.ai_severity);
+  const accent = severityAccent(issue.ai_severity);
 
   return (
     <Link href={`/dashboard/${issue.id}`} className="group block">
-      <div className="relative flex items-center gap-4 overflow-hidden rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
+      <div className="relative flex items-center gap-4 overflow-hidden rounded-md border border-border/60 bg-card/40 p-4 transition-colors hover:border-border hover:bg-card/70">
         {/* Severity accent rail */}
         <span
           aria-hidden
@@ -598,35 +604,35 @@ function IssueRow({ issue }: { issue: Issue }) {
           width={80}
           height={80}
           unoptimized
-          className="ml-1 size-16 shrink-0 rounded-lg object-cover ring-1 ring-black/5"
+          className="ml-1 size-16 shrink-0 rounded-md object-cover ring-1 ring-white/10"
         />
 
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate font-semibold group-hover:text-primary">
+            <p className="truncate font-medium group-hover:text-primary">
               {issue.title}
             </p>
             <StatusBadge status={issue.status} />
             {needsAcknowledgement(issue) && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">
+              <span className={cn(TAG_STYLES, "border-sky-500/30 text-sky-400")}>
                 <FileCheck2 className="size-3" />
-                Pending acknowledgement
+                Pending ack.
               </span>
             )}
             {overdue && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+              <span className={cn(TAG_STYLES, "border-amber-500/30 text-amber-400")}>
                 <Timer className="size-3" />
                 {overdueBy}h overdue
               </span>
             )}
             {issue.resolution_verdict === "verified" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
+              <span className={cn(TAG_STYLES, "border-emerald-500/30 text-emerald-400")}>
                 <BadgeCheck className="size-3" />
                 AI-verified
               </span>
             )}
             {issue.resolution_verdict === "not_fixed" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-400">
+              <span className={cn(TAG_STYLES, "border-red-500/30 text-red-400")}>
                 <ShieldAlert className="size-3" />
                 Not fixed
               </span>
@@ -661,21 +667,21 @@ function IssueRow({ issue }: { issue: Issue }) {
           <div className="text-right">
             <div className="flex items-baseline justify-end gap-1">
               <span
-                className="text-2xl font-bold tabular-nums"
+                className="font-mono text-2xl font-semibold tabular-nums"
                 style={{ color: accent }}
               >
                 {issue.ai_severity}
               </span>
               <span className="text-xs text-muted-foreground">/10</span>
             </div>
-            <p className="text-xs font-medium" style={{ color: accent }}>
+            <p className="font-mono text-[10px] font-medium tracking-wide uppercase" style={{ color: accent }}>
               {issue.ai_severity_label}
             </p>
           </div>
 
           <div className="hidden flex-col items-center gap-0.5 sm:flex">
             <ThumbsUp className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium tabular-nums">
+            <span className="font-mono text-sm font-medium tabular-nums">
               {issue.upvote_count}
             </span>
           </div>
