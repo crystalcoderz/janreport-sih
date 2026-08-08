@@ -21,7 +21,12 @@ export default async function OfficerLayout({
   ];
 
   return (
-    <div className="flex flex-1 flex-col">
+    // Forced dark, regardless of system preference — a civic ops console,
+    // not a marketing page, and every real one (Grafana, Datadog, an
+    // actual municipal command centre) reads this way by convention. All
+    // shared components already key off CSS variables rather than
+    // hardcoded colors, so this is a safe, self-contained override.
+    <div className="dark flex min-h-screen flex-1 flex-col bg-background text-foreground">
       <AppNav
         links={links}
         fullName={profile.full_name}
