@@ -680,7 +680,11 @@ function IssueRow({ issue }: { issue: Issue }) {
             </span>
           </div>
 
-          <ChevronRight className="size-5 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+          <span className="hidden items-center gap-1 text-sm font-medium text-primary md:flex">
+            View details
+            <ChevronRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+          </span>
+          <ChevronRight className="size-5 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-primary md:hidden" />
         </div>
       </div>
     </Link>
