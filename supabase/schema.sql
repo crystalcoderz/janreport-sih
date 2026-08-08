@@ -650,6 +650,29 @@ create policy "issues_update_officer_admin" on issues
     )
   );
 
+-- RLS scopes which ROWS an officer/admin may touch, but has no opinion on
+-- which COLUMNS — without this, an officer could rewrite title, photo_url,
+-- reporter_id, the AI fields, or even department_id (letting them escape
+-- department scoping on their next update). The app's officer-facing
+-- routes (status update, crew assignment) only ever write this exact
+-- column set.
+revoke update on issues from authenticated;
+grant update (
+  status,
+  resolution_photo_url,
+  resolution_note,
+  resolution_verdict,
+  resolution_verdict_reason,
+  resolution_verdict_confidence,
+  resolution_verified_at,
+  assigned_team_id,
+  assigned_at
+) on issues to authenticated;
+
+-- issues_insert_own (citizens filing a report) still needs its full column
+-- set — the revoke above only narrowed UPDATE, not INSERT.
+grant insert on issues to authenticated;
+
 -- issue_upvotes: any signed-in user can upvote/un-upvote, only as themselves.
 create policy "issue_upvotes_select_authenticated" on issue_upvotes
   for select to authenticated using (true);
