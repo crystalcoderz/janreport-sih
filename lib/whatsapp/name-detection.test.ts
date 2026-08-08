@@ -33,6 +33,27 @@ describe("extractStatedName", () => {
     expect(extractStatedName("")).toBeNull();
   });
 
+  it("does not mistake an auto-capitalized sentence-starter for a name", () => {
+    expect(extractStatedName("I am Really frustrated with the potholes on my street")).toBeNull();
+    expect(extractStatedName("I'm Extremely worried about this")).toBeNull();
+    expect(
+      extractStatedName("I'm Having a problem with garbage collection near my house")
+    ).toBeNull();
+    expect(extractStatedName("I am Facing this issue for two weeks now")).toBeNull();
+    expect(extractStatedName("I am Sorry for the late photo, here it is")).toBeNull();
+    expect(extractStatedName("I'm Sending a photo of the garbage now")).toBeNull();
+    // but a real capitalized name right after still works
+    expect(extractStatedName("I am Rohit, reporting a pothole")).toBe("Rohit");
+  });
+
+  it("does not mistake a refusal to give a name for the name itself", () => {
+    expect(extractStatedName("mera naam nahi bataunga")).toBeNull();
+    expect(extractStatedName("mera naam bhi yahi hai")).toBeNull();
+    expect(extractStatedName("mera naam kya hai")).toBeNull();
+    expect(extractStatedName("my name is not important")).toBeNull();
+    expect(extractStatedName("my name is private")).toBeNull();
+  });
+
   it("finds the name within a longer message", () => {
     expect(
       extractStatedName("Hi there, my name is Deepak and there's a big pothole here")

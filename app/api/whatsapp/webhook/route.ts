@@ -82,7 +82,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  const payload = JSON.parse(rawBody);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Meta's webhook shape, narrowed immediately below via optional chaining
+  let payload: any;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    // Nothing we can do with an unparseable body — ack it so Meta doesn't
+    // read a 500 as "delivery failed" and retry the same broken payload
+    // forever, the same retry-storm failure mode fixed above for slow
+    // replies.
+    console.warn("[whatsapp webhook] could not parse request body as JSON");
+    return NextResponse.json({ ok: true });
+  }
   const messages: WhatsAppMessage[] =
     payload?.entry?.[0]?.changes?.[0]?.value?.messages ?? [];
 

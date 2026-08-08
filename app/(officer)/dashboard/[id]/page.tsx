@@ -119,8 +119,10 @@ export default async function IssueDetailPage({
           <span className="flex items-center gap-1.5">
             <User className="size-4" />
             Reported by{" "}
-            {(issue as { profiles?: { full_name: string | null } }).profiles
-              ?.full_name ?? "a citizen"}{" "}
+            {issue.reporter_name ??
+              (issue as { profiles?: { full_name: string | null } }).profiles
+                ?.full_name ??
+              "a citizen"}{" "}
             ·{" "}
             {formatDistanceToNow(new Date(issue.created_at), {
               addSuffix: true,

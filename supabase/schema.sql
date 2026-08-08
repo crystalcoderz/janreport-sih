@@ -349,6 +349,41 @@ create trigger issues_set_updated_at
   before update on issues
   for each row execute function touch_issues_updated_at();
 
+-- RLS on issues only checks row-level access (officer's department matches
+-- the issue's department) — it can't cross-check that assigned_team_id
+-- actually belongs to that department. The app's assign API validates
+-- this, but an officer can bypass that route entirely via a direct
+-- PostgREST call with their own session token, since RLS alone permits it
+-- (confirmed live: a Roads officer successfully assigned a Sanitation team
+-- to a Roads issue this way). Enforce it in the database so it holds
+-- regardless of which door someone comes through.
+create or replace function enforce_assigned_team_department()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.assigned_team_id is not null then
+    if not exists (
+      select 1 from teams
+      where id = new.assigned_team_id
+        and department_id = new.department_id
+        and active = true
+    ) then
+      raise exception 'assigned_team_id must reference an active team in the issue''s own department';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_assigned_team_department on issues;
+create trigger trg_enforce_assigned_team_department
+  before insert or update of assigned_team_id, department_id on issues
+  for each row
+  execute function enforce_assigned_team_department();
+
 -- Keep issues.upvote_count in sync with issue_upvotes rows.
 create function apply_upvote_delta()
 returns trigger
