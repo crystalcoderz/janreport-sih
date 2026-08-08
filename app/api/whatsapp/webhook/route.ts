@@ -19,6 +19,7 @@ import {
   getReportSessionState,
 } from "@/lib/whatsapp/report";
 import { extractStatedName } from "@/lib/whatsapp/name-detection";
+import { isLinkRequest } from "@/lib/whatsapp/link-request";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { createWhatsAppSessionLink } from "@/lib/whatsapp/session-link";
 import { transcribeAudio } from "@/lib/ai/transcribe";
@@ -147,6 +148,16 @@ const QUICK_REPORT_BUTTONS = [
 // out as a second button message right after the quick-report one.
 const REPORTS_BUTTON_PROMPT = "Or check what you've already reported:";
 const REPORTS_BUTTONS = [{ id: "view_my_reports", title: "📋 My Reports" }];
+
+async function sendMyReportsLink(phone: string): Promise<void> {
+  const link = await createWhatsAppSessionLink(phone, "/my-reports");
+  await sendWhatsAppText(
+    phone,
+    link
+      ? `📋 Here's your reports, opens signed in automatically:\n${link}`
+      : "Could not create a link right now. Please try again."
+  );
+}
 
 // Illustrated how-to card sent with each category template as its caption.
 const CATEGORY_IMAGES: Record<string, string> = {
@@ -327,6 +338,8 @@ You also have tools to look up the citizen's own reports, a specific issue by ID
 
 If the citizen wants to see a report in the browser (photos, full timeline, AI verdict) rather than read it in chat, or just asks for a link, call get_report_link (with issueId for one specific report, omitted for their full My Reports list) and share the link — mention it signs them in automatically and is single-use, so don't reuse an old link from earlier in the conversation.
 
+CRITICAL — a link is not something you write, it's something the tool gives you. NEVER type out a URL, a placeholder like "<link>", or a made-up domain yourself under any circumstance. If you are about to mention a link and haven't just received one back from get_report_link in this exact turn, call the tool first — an invented or placeholder link sent to a citizen is a broken feature, not a helpful answer.
+
 When listing multiple reports (get_my_reports, find_nearby_issues), one line per report, most recent first, in this shape: "📅 <date> — *<title>* (<status>)". Keep it to the 5 most relevant unless asked for more. When describing one report in detail (get_issue_details), its photo has already been sent as a separate image message right before your reply — refer to it as "the photo above", never re-describe or link it yourself. Use labeled lines like the templates above rather than a paragraph.`;
 
 // WhatsApp caps reply buttons at 3 per message, so the categories and
@@ -396,6 +409,12 @@ async function handleMessage(message: WhatsAppMessage) {
             audioBase64: buffer.toString("base64"),
             mimeType: message.audio.mime_type || mimeType,
           });
+
+          if (isLinkRequest(transcript)) {
+            await sendMyReportsLink(phone);
+            return;
+          }
+
           userText = transcript;
           isGreeting = GREETING_RE.test(transcript);
           asksHowToReport = HOW_TO_REPORT_RE.test(transcript);
@@ -430,6 +449,12 @@ async function handleMessage(message: WhatsAppMessage) {
       case "text": {
         const body = message.text?.body?.trim();
         if (!body) return;
+
+        if (isLinkRequest(body)) {
+          await sendMyReportsLink(phone);
+          return;
+        }
+
         userText = body;
         isGreeting = GREETING_RE.test(body);
         asksHowToReport = HOW_TO_REPORT_RE.test(body);
@@ -464,13 +489,7 @@ async function handleMessage(message: WhatsAppMessage) {
           return;
         }
         if (buttonId === "view_my_reports") {
-          const link = await createWhatsAppSessionLink(phone, "/my-reports");
-          await sendWhatsAppText(
-            phone,
-            link
-              ? `📋 Here's your reports, opens signed in automatically:\n${link}`
-              : "Could not create a link right now. Please try again."
-          );
+          await sendMyReportsLink(phone);
           return;
         }
         userText = message.interactive?.button_reply?.title ?? null;
