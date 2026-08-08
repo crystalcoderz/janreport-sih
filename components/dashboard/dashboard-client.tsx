@@ -32,6 +32,7 @@ import {
   MapPin,
   BadgeCheck,
   ShieldAlert,
+  FileCheck2,
   ChevronRight,
   UserPlus,
   Users,
@@ -577,6 +578,12 @@ function IssueRow({ issue }: { issue: Issue }) {
               {issue.title}
             </p>
             <StatusBadge status={issue.status} />
+            {issue.status === "reported" && !issue.acknowledgement_sent_at && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">
+                <FileCheck2 className="size-3" />
+                Pending acknowledgement
+              </span>
+            )}
             {overdue && (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
                 <Timer className="size-3" />

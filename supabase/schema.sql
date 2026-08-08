@@ -115,6 +115,11 @@ create table issues (
   resolution_verified_at timestamptz,
   assigned_team_id uuid references teams (id) on delete set null,
   assigned_at timestamptz,
+  -- Captured fresh per report on WhatsApp (not read from profiles.full_name,
+  -- which is usually null there and may not be the person at the issue) —
+  -- used to personalize the officer-facing acknowledgement letter.
+  reporter_name text,
+  acknowledgement_sent_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -218,6 +223,7 @@ create table whatsapp_report_sessions (
   lat double precision,
   lng double precision,
   note text,
+  reporter_name text,
   updated_at timestamptz not null default now()
 );
 
@@ -666,7 +672,8 @@ grant update (
   resolution_verdict_confidence,
   resolution_verified_at,
   assigned_team_id,
-  assigned_at
+  assigned_at,
+  acknowledgement_sent_at
 ) on issues to authenticated;
 
 -- issues_insert_own (citizens filing a report) still needs its full column

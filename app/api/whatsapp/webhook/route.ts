@@ -15,8 +15,10 @@ import {
   savePhotoToSession,
   saveLocationToSession,
   saveNoteToSession,
+  saveReporterNameToSession,
   getReportSessionState,
 } from "@/lib/whatsapp/report";
+import { extractStatedName } from "@/lib/whatsapp/name-detection";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { createWhatsAppSessionLink } from "@/lib/whatsapp/session-link";
 import { transcribeAudio } from "@/lib/ai/transcribe";
@@ -169,6 +171,8 @@ To file your complaint, I just need:
 
 📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
 
+Also, what's your name?
+
 Once you send these, I'll prepare and submit the report for you. ✅`,
   report_electricity: `⚡ *Electricity / Power Fault Report*
 
@@ -179,6 +183,8 @@ To report the issue, I just need:
 📸 *A clear photo* of the problem (such as a damaged electric pole, transformer, exposed wires, or any visible fault).
 
 📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Also, what's your name?
 
 Once you send these, I'll prepare and submit the report for you. ✅`,
   report_garbage: `🗑️ *Garbage Collection / Waste Issue Report*
@@ -191,11 +197,28 @@ To report the issue, I just need:
 
 📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
 
+Also, what's your name?
+
 Once you send these, I'll prepare and submit the report for you. ✅`,
 };
 
 // Branded intro poster, sent as the very first thing in a fresh
 // conversation with the agent's greeting as its caption.
+// Sent instantly on a bare "hi"/"hello" — bypassing the agent entirely, the
+// same way the quick-report button taps do. A first "hi" is the single
+// highest-volume message this bot gets, and it never needs a model call:
+// the reply doesn't depend on anything the citizen said. A few variations
+// so a returning citizen doesn't see the exact same line every time.
+const GREETING_CAPTIONS = [
+  "👋 Hi! I'm JanReport — send a photo and location to report a civic issue like a pothole, garbage, or a water/electricity fault. You can also ask about reports you've already filed.",
+  "👋 Welcome to JanReport! Got a civic issue to report — pothole, garbage, water or power fault? Send a photo and location, or tap a button below.",
+  "👋 Hey! I'm JanReport, here to help report civic issues in your area. Send a photo + location to file one, or ask me about a report you've already made.",
+];
+
+function pickGreetingCaption(): string {
+  return GREETING_CAPTIONS[Math.floor(Math.random() * GREETING_CAPTIONS.length)];
+}
+
 const WELCOME_POSTER =
   "https://ipxyvstgrzjuknndabet.supabase.co/storage/v1/object/public/issue-photos/onboarding/welcome-poster.jpg";
 
@@ -230,6 +253,8 @@ To file your complaint, I just need:
 
 📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
 
+Also, what's your name?
+
 Once you send these, I'll prepare and submit the report for you. ✅
 
 ⚡ *Electricity / Power Fault Report*
@@ -241,6 +266,8 @@ To report the issue, I just need:
 📸 *A clear photo* of the problem (such as a damaged electric pole, transformer, exposed wires, or any visible fault).
 
 📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
+
+Also, what's your name?
 
 Once you send these, I'll prepare and submit the report for you. ✅
 
@@ -254,22 +281,26 @@ To report the issue, I just need:
 
 📍 *The exact location* — share a GPS pin, live location, or type the street/area name if you're not there right now.
 
+Also, what's your name?
+
 Once you send these, I'll prepare and submit the report for you. ✅
 
 For any other category (streetlight, drainage, etc.) or once a photo/location is already on file, don't use these templates — respond normally per the rest of this prompt.
 
 If the citizen wants to abandon a report they were in the middle of (says "cancel", "never mind", "start over"), call cancel_report and confirm in one line — they can start fresh right after.
 
-To file a report you need a photo AND a location, both already sent to this chat (never asked for as tool arguments — you just call file_new_report once you believe you have both, and it reads whatever the citizen already sent). If something's still missing, tell them exactly what's still needed in one line — e.g. "📸 Got the photo — now share the location and I'll file it." Never ask for both again if one is already saved. A caption or text message can serve as an optional note.
+To file a report you need a photo, a location, AND their name — all saved to this chat before file_new_report will succeed (never ask for these as tool arguments — file_new_report just reads whatever's already saved). Ask for a name fresh every time a new report starts, even for a citizen who has reported before — call set_reporter_name as soon as they give it, don't wait to collect everything first. If something's still missing, tell them exactly what in one line — e.g. "📸 Got the photo — now share the location and your name and I'll file it." Never ask again for something already saved. A caption or text message can serve as an optional note.
 
 Location is normally a shared GPS pin. But if the citizen isn't physically at the issue right now (reporting from an older photo, or GPS sharing isn't working), ask them to describe where it is instead — street, area, landmark, or city — and call set_location_by_address with that description.
+
+CRITICAL — name is not a passive fact, it's a tool call. The moment a message contains the citizen's name in ANY form — "My name is X", "I'm X", "This is X", or literally just a bare name typed on its own ("Rohit Sharma") when name is the only thing still missing — you MUST call set_reporter_name with it in that same turn, even if the message contains nothing else. Do not just reply "Nice to meet you" or acknowledge it in prose without calling the tool — an unrecorded name means file_new_report will keep failing with missing_photo_or_location_or_name and the citizen will be stuck with no idea why.
 
 CRITICAL — when a citizen sends a bare place name ("Gla noida", "sector 62", "near city hospital") and you already have their photo, that IS them giving you the location. Do not reply "Got it." and stop. In the SAME turn:
 1. Call set_location_by_address with what they said.
 2. If it returns resolved: false, tell them you couldn't find it and ask for a nearby landmark or city — do NOT claim you saved it.
-3. If it resolves, immediately call file_new_report (you now have photo + location, so there is nothing left to wait for) and reply with the filed-report confirmation, mentioning the resolved address so they can spot a wrong pin.
+3. If it resolves and you also already have their name, immediately call file_new_report and reply with the filed-report confirmation, mentioning the resolved address so they can spot a wrong pin. If you still don't have their name, ask for it in this same reply instead of filing.
 
-Never reply with a bare acknowledgement like "Got it." after a location — either the report gets filed in that same turn, or you say exactly what is still missing. A citizen who has sent both a photo and a location and receives only "Got it." will reasonably think their report was filed when it was not.
+Never reply with a bare acknowledgement like "Got it." after a location — either the report gets filed in that same turn (or you ask for the one remaining thing, e.g. their name), or you say exactly what is still missing. A citizen who has sent a photo and a location and receives only "Got it." will reasonably think their report was filed when it was not.
 
 Before filing, file_new_report automatically checks for very similar open reports already nearby. If it returns duplicates, its photo has already been sent to the citizen as a separate image message right before your reply — refer to it as "the photo above", never re-describe or link it yourself. Reply using exactly this structure for the closest duplicate:
 🔁 *Possible duplicate found*
@@ -283,6 +314,7 @@ Is this the same issue you're seeing (see photo above)? Reply yes to add your vo
 
 When file_new_report succeeds, confirm using exactly this structure:
 ✅ *Report filed!*
+Thanks, <reporterName> — here are the details:
 *Issue:* <title>
 *Severity:* <severity>
 *Department:* <department>
@@ -341,6 +373,10 @@ async function handleMessage(message: WhatsAppMessage) {
         }
         if (message.image.caption) {
           await saveNoteToSession(phone, message.image.caption);
+          const statedName = extractStatedName(message.image.caption);
+          if (statedName) {
+            await saveReporterNameToSession(phone, statedName);
+          }
         }
         userText = message.image.caption
           ? `[The citizen just sent a photo of the issue, with this caption: "${message.image.caption}"]`
@@ -363,6 +399,10 @@ async function handleMessage(message: WhatsAppMessage) {
           userText = transcript;
           isGreeting = GREETING_RE.test(transcript);
           asksHowToReport = HOW_TO_REPORT_RE.test(transcript);
+          const statedName = extractStatedName(transcript);
+          if (statedName) {
+            await saveReporterNameToSession(phone, statedName);
+          }
         } catch (err) {
           console.error("Failed to transcribe voice note", err);
           await sendWhatsAppText(
@@ -393,6 +433,11 @@ async function handleMessage(message: WhatsAppMessage) {
         userText = body;
         isGreeting = GREETING_RE.test(body);
         asksHowToReport = HOW_TO_REPORT_RE.test(body);
+
+        const statedName = extractStatedName(body);
+        if (statedName) {
+          await saveReporterNameToSession(phone, statedName);
+        }
         break;
       }
       case "interactive": {
@@ -461,7 +506,7 @@ async function handleMessage(message: WhatsAppMessage) {
     // whole welcome — that reads as the bot randomly restarting and losing
     // their progress. Only greet fresh conversations; otherwise just answer
     // normally and let the agent carry the in-progress report forward.
-    const hasReportInProgress = session.hasPhoto || session.hasLocation;
+    const hasReportInProgress = session.hasPhoto || session.hasLocation || session.hasName;
     const welcome = isGreeting && !hasReportInProgress;
     // "How do I report?" gets the buttons too (the answer is literally
     // "tap one"), just without replaying the full poster/voice welcome.
@@ -469,29 +514,40 @@ async function handleMessage(message: WhatsAppMessage) {
 
     const contextNote = `[Current report-in-progress status for this chat — photo: ${
       session.hasPhoto ? "received" : "not yet received"
-    }, location: ${session.hasLocation ? "received" : "not yet received"}, note: ${
-      session.hasNote ? "received" : "none"
-    }. ${
+    }, location: ${session.hasLocation ? "received" : "not yet received"}, name: ${
+      session.hasName ? "received" : "not yet received"
+    }, note: ${session.hasNote ? "received" : "none"}. ${
       showButtons
         ? "Quick-report buttons WILL be shown right below your reply — you may invite them to tap one."
         : "NO buttons will be shown below your reply — do not mention buttons or tapping anything."
     }]`;
 
-    const agentStart = Date.now();
-    const { reply, toolResults } = await runKimiAgent(
-      SYSTEM_PROMPT,
-      [
-        { role: "user", content: contextNote },
-        { role: "user", content: userText },
-      ],
-      { userId: profileId, supabase: createServiceRoleClient(), phone },
-      WHATSAPP_TOOL_DEFINITIONS
-    );
-    console.log(
-      `[whatsapp perf] agent ${Date.now() - agentStart}ms tools=[${toolResults
-        .map((t) => t.name)
-        .join(",")}]`
-    );
+    // A bare greeting's reply never depends on anything the citizen said,
+    // so skip the LLM round-trip entirely — same principle as the
+    // category-button templates, applied to the highest-volume message
+    // this bot receives.
+    let reply: string;
+    let toolResults: { name: string; result: unknown }[];
+    if (welcome) {
+      reply = pickGreetingCaption();
+      toolResults = [];
+    } else {
+      const agentStart = Date.now();
+      ({ reply, toolResults } = await runKimiAgent(
+        SYSTEM_PROMPT,
+        [
+          { role: "user", content: contextNote },
+          { role: "user", content: userText },
+        ],
+        { userId: profileId, supabase: createServiceRoleClient(), phone },
+        WHATSAPP_TOOL_DEFINITIONS
+      ));
+      console.log(
+        `[whatsapp perf] agent ${Date.now() - agentStart}ms tools=[${toolResults
+          .map((t) => t.name)
+          .join(",")}]`
+      );
+    }
 
     // When file_new_report finds a close-by duplicate, or get_issue_details
     // looks up one specific report, show the actual photo as a real

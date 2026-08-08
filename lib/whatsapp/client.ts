@@ -102,6 +102,25 @@ export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: 
   });
 }
 
+export async function sendWhatsAppDocument(
+  to: string,
+  documentUrl: string,
+  filename: string,
+  caption?: string
+) {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  return callGraphApi(`${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "document",
+      document: { link: documentUrl, filename, ...(caption ? { caption } : {}) },
+    }),
+  });
+}
+
 // Sends the OTP via an approved "authentication" template if
 // WHATSAPP_OTP_TEMPLATE_NAME is set (required for business-initiated
 // messages outside a 24h user-reply window — see README). Falls back to a

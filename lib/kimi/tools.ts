@@ -5,6 +5,7 @@ import { haversineDistanceMeters } from "@/lib/geo";
 import {
   finalizeReportIfReady,
   saveAddressToSession,
+  saveReporterNameToSession,
   clearReportSession,
 } from "@/lib/whatsapp/report";
 import { createWhatsAppSessionLink } from "@/lib/whatsapp/session-link";
@@ -142,6 +143,24 @@ export const WHATSAPP_TOOL_DEFINITIONS = [
           },
         },
         required: ["address"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "set_reporter_name",
+      description:
+        "WhatsApp only. Saves the citizen's name against the report currently being filed in this chat. A name is required before file_new_report will succeed, even if the citizen has reported before — ask for it fresh every time (they may be reporting on someone else's behalf), and call this as soon as they give it.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "The citizen's name, as they gave it.",
+          },
+        },
+        required: ["name"],
       },
     },
   },
@@ -345,9 +364,10 @@ async function fileNewReport(ctx: ToolContext, args: { forceNew?: boolean }) {
     case "incomplete":
       return {
         filed: false,
-        reason: "missing_photo_or_location",
+        reason: "missing_photo_or_location_or_name",
         hasPhoto: result.hasPhoto,
         hasLocation: result.hasLocation,
+        hasName: result.hasName,
       };
     case "duplicates":
       return {
@@ -371,6 +391,14 @@ async function setLocationByAddress(ctx: ToolContext, args: { address: string })
   const result = await saveAddressToSession(ctx.phone, args.address.trim());
   if (!result.ok) return { resolved: false, reason: result.error };
   return { resolved: true, formattedAddress: result.formattedAddress, mapsLink: result.mapsLink };
+}
+
+async function setReporterName(ctx: ToolContext, args: { name: string }) {
+  if (!ctx.phone) return { error: "set_reporter_name is only available on WhatsApp." };
+  if (!args.name?.trim()) return { error: "name is required." };
+
+  await saveReporterNameToSession(ctx.phone, args.name.trim());
+  return { saved: true };
 }
 
 async function getReportLink(ctx: ToolContext, args: { issueId?: string }) {
@@ -419,6 +447,8 @@ export async function executeTool(
       return fileNewReport(ctx, args as { forceNew?: boolean });
     case "set_location_by_address":
       return setLocationByAddress(ctx, args as { address: string });
+    case "set_reporter_name":
+      return setReporterName(ctx, args as { name: string });
     case "get_report_link":
       return getReportLink(ctx, args as { issueId?: string });
     case "upvote_existing_report":
