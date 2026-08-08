@@ -100,6 +100,19 @@ export async function saveNoteToSession(phone: string, note: string): Promise<vo
   });
 }
 
+// Asked fresh for every report rather than read from profiles.full_name —
+// most WhatsApp citizens have no profile name at all, and the person
+// messaging may be reporting on someone else's behalf. Used to personalize
+// the officer-facing acknowledgement letter.
+export async function saveReporterNameToSession(phone: string, name: string): Promise<void> {
+  const supabase = createServiceRoleClient();
+  await supabase.from("whatsapp_report_sessions").upsert({
+    phone,
+    reporter_name: name.trim().slice(0, 100),
+    updated_at: new Date().toISOString(),
+  });
+}
+
 // What's currently sitting in this phone's in-progress report, so the
 // agent can be told what it still needs instead of guessing.
 // Abandoned sessions (citizen sent a photo, then never came back) would
@@ -109,31 +122,35 @@ export async function saveNoteToSession(phone: string, note: string): Promise<vo
 // still overwrites it normally).
 const SESSION_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-export async function getReportSessionState(
-  phone: string
-): Promise<{ hasPhoto: boolean; hasLocation: boolean; hasNote: boolean }> {
+export async function getReportSessionState(phone: string): Promise<{
+  hasPhoto: boolean;
+  hasLocation: boolean;
+  hasNote: boolean;
+  hasName: boolean;
+}> {
   const supabase = createServiceRoleClient();
   const { data: session } = await supabase
     .from("whatsapp_report_sessions")
-    .select("photo_base64, lat, lng, note, updated_at")
+    .select("photo_base64, lat, lng, note, reporter_name, updated_at")
     .eq("phone", phone)
     .maybeSingle();
 
   const stale =
     !!session && Date.now() - new Date(session.updated_at).getTime() > SESSION_STALE_AFTER_MS;
   if (!session || stale) {
-    return { hasPhoto: false, hasLocation: false, hasNote: false };
+    return { hasPhoto: false, hasLocation: false, hasNote: false, hasName: false };
   }
 
   return {
     hasPhoto: Boolean(session.photo_base64),
     hasLocation: session.lat != null && session.lng != null,
     hasNote: Boolean(session.note),
+    hasName: Boolean(session.reporter_name),
   };
 }
 
 export type FinalizeReportResult =
-  | { status: "incomplete"; hasPhoto: boolean; hasLocation: boolean }
+  | { status: "incomplete"; hasPhoto: boolean; hasLocation: boolean; hasName: boolean }
   | {
       status: "duplicates";
       category: string;
@@ -157,6 +174,7 @@ export type FinalizeReportResult =
         confidence: number;
         department: string | null;
         mapsLink: string;
+        reporterName: string;
       };
     }
   | { status: "error"; message: string };
@@ -180,11 +198,18 @@ export async function finalizeReportIfReady(
     .eq("phone", phone)
     .maybeSingle();
 
-  if (!session || !session.photo_base64 || session.lat === null || session.lng === null) {
+  if (
+    !session ||
+    !session.photo_base64 ||
+    session.lat === null ||
+    session.lng === null ||
+    !session.reporter_name
+  ) {
     return {
       status: "incomplete",
       hasPhoto: Boolean(session?.photo_base64),
       hasLocation: session?.lat != null && session?.lng != null,
+      hasName: Boolean(session?.reporter_name),
     };
   }
 
@@ -274,6 +299,7 @@ export async function finalizeReportIfReady(
       lng: session.lng,
       address: address ?? undefined,
       department_id: departmentResult.data?.id ?? null,
+      reporter_name: session.reporter_name,
     })
     .select("*, departments(name)")
     .single();
@@ -297,6 +323,7 @@ export async function finalizeReportIfReady(
       confidence: classification.confidence,
       department: issue.departments?.name ?? null,
       mapsLink: googleMapsLink(issue.lat, issue.lng),
+      reporterName: session.reporter_name,
     },
   };
 }

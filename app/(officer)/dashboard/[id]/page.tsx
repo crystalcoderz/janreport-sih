@@ -8,6 +8,7 @@ import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { StatusUpdateForm } from "@/components/dashboard/status-update-form";
 import { AssignTeamForm } from "@/components/dashboard/assign-team-form";
+import { SendAcknowledgementButton } from "@/components/dashboard/send-acknowledgement-button";
 import { IssueLocationMap } from "@/components/map/issue-location-map";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
 import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
@@ -160,6 +161,18 @@ export default async function IssueDetailPage({
       </div>
 
       <div className="flex flex-col gap-4 lg:col-span-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Acknowledgement</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SendAcknowledgementButton
+              issueId={issue.id}
+              sentAt={issue.acknowledgement_sent_at}
+            />
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Assigned crew</CardTitle>
