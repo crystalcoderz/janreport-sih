@@ -437,6 +437,55 @@ create trigger issues_award_points_on_report
   after insert on issues
   for each row execute function award_points_on_issue_report();
 
+-- issues_insert_own only checks reporter_id = auth.uid() — nothing stops
+-- a citizen inserting directly via REST with status:'resolved',
+-- upvote_count:9999, a self-assigned crew, or a fabricated resolution
+-- verdict, none of which any real insert path ever sets (both the web
+-- route and the WhatsApp flow only ever set reporter/title/description/
+-- classification/photo/location/department at creation). Confirmed live:
+-- a citizen POSTed a "resolved" issue with upvote_count 9999 and got 201.
+--
+-- Deliberately narrower than blocking the whole insert: ai_category,
+-- ai_severity, department_id etc. are legitimately set by the citizen's
+-- own session client in the real flow (server-computed, but written under
+-- their RLS context, not service role), so those stay as-is — this only
+-- forces the workflow fields that are always attacker-controlled and
+-- never legitimately non-default at creation.
+--
+-- Scoped to auth.uid() is not null so service-role inserts (the WhatsApp
+-- flow, and any future admin/seed script) are untouched — service role
+-- has no JWT, so auth.uid() reads null there regardless of role checks.
+create function guard_issue_workflow_fields_on_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is not null and not exists (
+    select 1 from profiles p where p.id = auth.uid() and p.role = 'admin'
+  ) then
+    new.status := 'reported';
+    new.upvote_count := 0;
+    new.assigned_team_id := null;
+    new.assigned_at := null;
+    new.resolution_photo_url := null;
+    new.resolution_note := null;
+    new.resolution_verdict := null;
+    new.resolution_verdict_reason := null;
+    new.resolution_verdict_confidence := null;
+    new.resolution_verified_at := null;
+    new.acknowledgement_sent_at := null;
+    new.duplicate_of := null;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger issues_guard_workflow_fields
+  before insert on issues
+  for each row execute function guard_issue_workflow_fields_on_insert();
+
 create function award_points_on_issue_resolved()
 returns trigger
 language plpgsql
@@ -563,9 +612,14 @@ create trigger issue_volunteer_offers_set_updated_at
   before update on issue_volunteer_offers
   for each row execute function touch_updated_at();
 
--- Only an officer/admin may flip a volunteer group's `verified` flag —
+-- Only an officer/admin may set a volunteer group's `verified` flag —
 -- otherwise a group could self-certify as legitimate. Mirrors
--- prevent_profile_privilege_escalation's approach above.
+-- prevent_profile_privilege_escalation's approach above. Originally only
+-- ran on UPDATE, which guarded a citizen flipping an existing row but not
+-- inserting a brand-new one already marked verified — confirmed live: a
+-- plain citizen POSTed a group with verified:true and got 201, bypassing
+-- the "officers verify legitimate groups" step the UI promises. INSERT
+-- has no `old` row to fall back to, so that branch just forces false.
 create function prevent_volunteer_group_self_verify()
 returns trigger
 language plpgsql
@@ -573,6 +627,18 @@ security definer
 set search_path = public
 as $$
 begin
+  if tg_op = 'INSERT' then
+    if new.verified
+      and not exists (
+        select 1 from profiles p
+        where p.id = auth.uid() and p.role in ('officer', 'admin')
+      )
+    then
+      new.verified := false;
+    end if;
+    return new;
+  end if;
+
   if new.verified is distinct from old.verified
     and not exists (
       select 1 from profiles p
@@ -586,7 +652,7 @@ end;
 $$;
 
 create trigger volunteer_groups_guard_verified
-  before update on volunteer_groups
+  before insert or update on volunteer_groups
   for each row execute function prevent_volunteer_group_self_verify();
 
 -- These are all trigger-only functions (return type "trigger"), so
@@ -603,6 +669,9 @@ revoke execute on function award_points_on_issue_resolved() from public, anon, a
 revoke execute on function notify_nearby_residents() from public, anon, authenticated;
 revoke execute on function prevent_issue_notification_tamper() from public, anon, authenticated;
 revoke execute on function prevent_volunteer_group_self_verify() from public, anon, authenticated;
+revoke execute on function guard_issue_workflow_fields_on_insert() from public, anon, authenticated;
+revoke execute on function apply_upvote_delta() from public, anon, authenticated;
+revoke execute on function enforce_assigned_team_department() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- Row Level Security
