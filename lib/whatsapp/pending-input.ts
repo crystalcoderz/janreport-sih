@@ -25,6 +25,32 @@ const PLACE_WORDS = new Set([
   "behind", "beside", "front",
 ]);
 
+// The other thing a citizen types mid-report that is short, unpunctuated
+// and name-shaped: the issue itself. Without this, "big pothole here" and
+// "garbage" get filed as who they are, and the acknowledgement letter goes
+// out addressed "Dear big pothole here,".
+const ISSUE_WORDS = new Set([
+  "pothole", "potholes", "hole", "holes", "garbage", "trash", "waste",
+  "rubbish", "dump", "dumping", "kachra", "water", "sewage", "sewer",
+  "drain", "drainage", "nali", "leak", "leaking", "leakage", "light",
+  "lights", "streetlight", "lamp", "power", "electricity", "current",
+  "bijli", "wire", "wires", "cable", "pole", "transformer", "tree",
+  "branch", "dog", "dogs", "stray", "cattle", "toilet", "manhole",
+  "footpath", "pavement", "signal", "sign", "bin", "dustbin", "smell",
+  "smoke", "fire", "traffic", "parking", "encroachment",
+  // condition and urgency words that pad those out into a phrase
+  "broken", "damaged", "blocked", "clogged", "overflow", "overflowing",
+  "cracked", "missing", "dirty", "filthy", "stinking", "smelly", "open",
+  "fallen", "burnt", "dead", "dangerous", "unsafe", "urgent", "emergency",
+  "big", "large", "small", "deep", "huge", "many", "lot", "lots", "very",
+  "not", "working", "since", "days", "weeks", "months", "everyday",
+  "daily", "again", "still",
+  // generic filler
+  "here", "there", "everywhere", "issue", "issues", "problem", "problems",
+  "complaint", "report", "repair", "fix", "please", "help", "area",
+  "place", "side", "kindly", "sir", "madam",
+]);
+
 const NAME_SHAPE_RE = /^[a-zA-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*(?:\s+[a-zA-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*){0,3}$/;
 
 // Openers that mark a message as a question or command rather than an
@@ -50,7 +76,10 @@ export function looksLikeBareName(text: string): boolean {
   return !trimmed
     .toLowerCase()
     .split(/\s+/)
-    .some((word) => PLACE_WORDS.has(word.replace(/[.'-]/g, "")));
+    .some((raw) => {
+      const word = raw.replace(/[.'-]/g, "");
+      return PLACE_WORDS.has(word) || ISSUE_WORDS.has(word);
+    });
 }
 
 export type PendingInputResolution =

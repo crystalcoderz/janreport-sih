@@ -29,6 +29,17 @@ describe("looksLikeBareName", () => {
     expect(looksLikeBareName("hi")).toBe(false);
   });
 
+  it("rejects a description of the issue, which is also short and name-shaped", () => {
+    // Otherwise the acknowledgement letter goes out "Dear big pothole here,".
+    expect(looksLikeBareName("big pothole here")).toBe(false);
+    expect(looksLikeBareName("garbage")).toBe(false);
+    expect(looksLikeBareName("water leaking")).toBe(false);
+    expect(looksLikeBareName("streetlight not working")).toBe(false);
+    expect(looksLikeBareName("broken wire")).toBe(false);
+    expect(looksLikeBareName("very dirty")).toBe(false);
+    expect(looksLikeBareName("urgent please fix")).toBe(false);
+  });
+
   it("rejects sentences", () => {
     expect(
       looksLikeBareName("there is a really big pothole outside my house here")
