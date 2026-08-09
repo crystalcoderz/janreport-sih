@@ -4,12 +4,14 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { Camera, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "@/lib/i18n/context";
 
 export function PhotoCapture({
   onChange,
 }: {
   onChange: (file: File | null) => void;
 }) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
@@ -24,7 +26,7 @@ export function PhotoCapture({
       <div className="relative overflow-hidden rounded-lg border">
         <Image
           src={preview}
-          alt="Selected issue photo"
+          alt={t("report.photoAlt")}
           width={640}
           height={480}
           unoptimized
@@ -53,7 +55,7 @@ export function PhotoCapture({
       className="flex h-64 w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary"
     >
       <Camera className="size-8" />
-      <span className="text-sm font-medium">Tap to take or upload a photo</span>
+      <span className="text-sm font-medium">{t("report.photoPrompt")}</span>
       <input
         ref={inputRef}
         type="file"

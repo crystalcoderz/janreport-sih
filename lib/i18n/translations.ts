@@ -18,29 +18,36 @@ export const en = {
   "landing.signIn": "Sign in",
   "landing.getStarted": "Get started",
   "landing.goToApp": "Go to app",
-  "landing.heroTitle": "See a civic issue? Report it in seconds.",
+  "landing.heroTitle": "Report a pothole the same way you text a friend.",
   "landing.heroSubtitle":
-    "Snap a photo, share your location — AI classifies the issue, scores its severity, and routes it to the right municipal department automatically. Track resolution in real time.",
+    "Send a photo to JanReport on WhatsApp. AI reads it, scores how urgent it is, and routes it to the right municipal department — and every update comes back to the same chat. No app to install.",
   "landing.ctaReport": "Report an issue",
   "landing.ctaOpenApp": "Open JanReport",
   "landing.ctaViewMap": "View live map",
-  "landing.featurePhotoTitle": "Photo + GPS",
-  "landing.featurePhotoDesc":
-    "Capture the issue with your camera — location is tagged automatically.",
-  "landing.featureAiTitle": "AI classification",
-  "landing.featureAiDesc":
-    "Gemini vision AI categorizes the issue and scores severity instantly.",
-  "landing.featureRouteTitle": "Auto-routed",
-  "landing.featureRouteDesc":
-    "Issues are routed straight to the responsible department — no manual triage.",
-  "landing.featureTrackTitle": "Live tracking",
-  "landing.featureTrackDesc":
-    "Follow your report's status in real time, from reported to resolved.",
+  "landing.statReports": "Reports filed",
+  "landing.statResolved": "Resolved",
+  "landing.statDepartments": "Departments live",
+  "landing.howTitle": "From photo to fixed",
+  "landing.step1Title": "Send a photo on WhatsApp",
+  "landing.step1Desc":
+    "Message JanReport, attach a photo, drop a pin. No app, no signup, no form to fill in.",
+  "landing.step2Title": "AI reads the photo",
+  "landing.step2Desc":
+    "Gemini vision identifies what the issue is and scores how urgent it is, out of ten.",
+  "landing.step3Title": "Routed automatically",
+  "landing.step3Desc":
+    "The report lands with the responsible department in seconds — no manual triage, no phone queue.",
+  "landing.step4Title": "Tracked to resolution",
+  "landing.step4Desc":
+    "Officers dispatch a crew, and status updates come back on the same WhatsApp chat.",
+  "landing.webAlso": "Prefer a browser? Every one of these works on the web too.",
 
   "report.title": "Report a civic issue",
   "report.description":
     "Add a photo and your location — AI handles classification and routing.",
   "report.photoLabel": "Photo",
+  "report.photoPrompt": "Tap to take or upload a photo",
+  "report.photoAlt": "Selected issue photo",
   "report.locationLabel": "Location",
   "report.shareLocation": "Share current location",
   "report.gettingLocation": "Getting location...",
@@ -99,29 +106,36 @@ export const hi: Partial<Record<TranslationKey, string>> = {
   "landing.signIn": "साइन इन करें",
   "landing.getStarted": "शुरू करें",
   "landing.goToApp": "ऐप खोलें",
-  "landing.heroTitle": "कोई नागरिक समस्या दिखी? कुछ ही सेकंड में दर्ज करें।",
+  "landing.heroTitle": "गड्ढे की शिकायत अब बस एक WhatsApp मैसेज जितनी आसान।",
   "landing.heroSubtitle":
-    "फोटो खींचें, अपना स्थान साझा करें — AI समस्या की पहचान करता है, गंभीरता का आकलन करता है, और इसे सही नगर विभाग तक स्वतः भेज देता है। समाधान को वास्तविक समय में ट्रैक करें।",
+    "JanReport को WhatsApp पर फोटो भेजें। AI उसे पढ़ता है, गंभीरता आंकता है, और सही नगर विभाग तक पहुंचाता है — और हर अपडेट उसी चैट पर वापस आता है। कोई ऐप इंस्टॉल करने की ज़रूरत नहीं।",
   "landing.ctaReport": "समस्या दर्ज करें",
   "landing.ctaOpenApp": "JanReport खोलें",
   "landing.ctaViewMap": "लाइव मानचित्र देखें",
-  "landing.featurePhotoTitle": "फोटो + GPS",
-  "landing.featurePhotoDesc":
-    "अपने कैमरे से समस्या की फोटो लें — स्थान स्वतः टैग हो जाता है।",
-  "landing.featureAiTitle": "AI वर्गीकरण",
-  "landing.featureAiDesc":
-    "Gemini Vision AI तुरंत समस्या की श्रेणी और गंभीरता तय करता है।",
-  "landing.featureRouteTitle": "स्वतः रूटिंग",
-  "landing.featureRouteDesc":
-    "समस्याएं सीधे संबंधित विभाग को भेजी जाती हैं — कोई मैन्युअल जांच नहीं।",
-  "landing.featureTrackTitle": "लाइव ट्रैकिंग",
-  "landing.featureTrackDesc":
-    "अपनी रिपोर्ट की स्थिति को दर्ज होने से समाधान तक वास्तविक समय में देखें।",
+  "landing.statReports": "दर्ज शिकायतें",
+  "landing.statResolved": "हल हुईं",
+  "landing.statDepartments": "सक्रिय विभाग",
+  "landing.howTitle": "फोटो से समाधान तक",
+  "landing.step1Title": "WhatsApp पर फोटो भेजें",
+  "landing.step1Desc":
+    "JanReport को मैसेज करें, फोटो लगाएं, लोकेशन भेजें। कोई ऐप नहीं, कोई साइनअप नहीं, कोई फॉर्म नहीं।",
+  "landing.step2Title": "AI फोटो पढ़ता है",
+  "landing.step2Desc":
+    "Gemini Vision पहचानता है कि समस्या क्या है और दस में से कितनी गंभीर है।",
+  "landing.step3Title": "स्वतः सही विभाग तक",
+  "landing.step3Desc":
+    "शिकायत सेकंडों में ज़िम्मेदार विभाग तक पहुंचती है — न मैन्युअल जांच, न फोन की कतार।",
+  "landing.step4Title": "समाधान तक ट्रैकिंग",
+  "landing.step4Desc":
+    "अधिकारी टीम भेजते हैं, और स्थिति के अपडेट उसी WhatsApp चैट पर आते हैं।",
+  "landing.webAlso": "ब्राउज़र पसंद है? यह सब वेब पर भी उपलब्ध है।",
 
   "report.title": "नागरिक समस्या दर्ज करें",
   "report.description":
     "एक फोटो और अपना स्थान जोड़ें — AI वर्गीकरण और रूटिंग संभालता है।",
   "report.photoLabel": "फोटो",
+  "report.photoPrompt": "फोटो लेने या अपलोड करने के लिए टैप करें",
+  "report.photoAlt": "चुनी गई समस्या की फोटो",
   "report.locationLabel": "स्थान",
   "report.shareLocation": "वर्तमान स्थान साझा करें",
   "report.gettingLocation": "स्थान प्राप्त हो रहा है...",
