@@ -95,6 +95,35 @@ export async function generateAcknowledgementPdf(
   });
   y -= 12;
 
+  // Nearest municipal office up front, letterhead-style — the citizen's
+  // first "where do I actually go" question, before anything else on the
+  // page. Best-effort: Places API may not be enabled on every deployment,
+  // and a missing/failed lookup should never block the letter itself.
+  const office = await findNearbyMunicipalOffice(params.lat, params.lng);
+  line("Nearest Municipal Office / Nagar Nigam", {
+    size: 10,
+    font: bold,
+    color: rgb(0.45, 0.45, 0.45),
+    gap: 4,
+  });
+  if (office) {
+    paragraph(office.name, 11, bold);
+    paragraph(office.address, 10);
+  } else {
+    paragraph(
+      "Please contact your local Municipal Corporation / Nagar Nigam office regarding this report.",
+      10
+    );
+  }
+  y -= 10;
+  page.drawLine({
+    start: { x: MARGIN_X, y: y + 8 },
+    end: { x: PAGE_WIDTH - MARGIN_X, y: y + 8 },
+    thickness: 0.5,
+    color: rgb(0.88, 0.88, 0.88),
+  });
+  y -= 10;
+
   const dateStr = new Intl.DateTimeFormat("en-IN", {
     dateStyle: "long",
     timeStyle: "short",
@@ -123,20 +152,6 @@ export async function generateAcknowledgementPdf(
   line("Reported Location", { size: 12, font: bold, gap: 6 });
   paragraph(params.address ?? `${params.lat.toFixed(5)}, ${params.lng.toFixed(5)}`);
   paragraph(googleMapsLink(params.lat, params.lng), 10, font);
-  y -= 8;
-
-  // Best-effort — Places API may not be enabled on every deployment, and
-  // a missing/failed lookup should never block the letter itself.
-  const office = await findNearbyMunicipalOffice(params.lat, params.lng);
-  line("For Further Correspondence", { size: 12, font: bold, gap: 6 });
-  if (office) {
-    paragraph(office.name, 11, bold);
-    paragraph(office.address);
-  } else {
-    paragraph(
-      "Please contact your local Municipal Corporation / Nagar Nigam office regarding this report."
-    );
-  }
   y -= 12;
 
   // Best-effort photo embed — SVG/WebP or a fetch failure just becomes a
