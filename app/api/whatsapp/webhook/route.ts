@@ -17,9 +17,11 @@ import {
   saveNoteToSession,
   saveReporterNameToSession,
   getReportSessionState,
+  finalizeReportIfReady,
 } from "@/lib/whatsapp/report";
 import { extractStatedName } from "@/lib/whatsapp/name-detection";
 import { isLinkRequest } from "@/lib/whatsapp/link-request";
+import { resolvePendingReportInput } from "@/lib/whatsapp/pending-input";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { createWhatsAppSessionLink } from "@/lib/whatsapp/session-link";
 import { transcribeAudio } from "@/lib/ai/transcribe";
@@ -159,6 +161,56 @@ const QUICK_REPORT_BUTTONS = [
 // out as a second button message right after the quick-report one.
 const REPORTS_BUTTON_PROMPT = "Or check what you've already reported:";
 const REPORTS_BUTTONS = [{ id: "view_my_reports", title: "📋 My Reports" }];
+
+// Files the report sitting in this chat's session and answers with the
+// same wording the system prompt asks the agent for — composed here so it
+// is guaranteed rather than reproduced from memory by the model. Returns
+// true when it has fully handled the turn (filed, or found duplicates and
+// asked about them), false when the caller should carry on to the agent.
+async function fileCompletedReport(phone: string): Promise<boolean> {
+  const result = await finalizeReportIfReady(phone);
+
+  if (result.status === "filed") {
+    const { issue } = result;
+    await sendWhatsAppText(
+      phone,
+      `✅ *Report filed!*\n` +
+        `Thanks, ${issue.reporterName} — here are the details:\n` +
+        `*Issue:* ${issue.title}\n` +
+        `*Severity:* ${issue.severity}\n` +
+        `*Department:* ${issue.department ?? "Being assigned"}\n` +
+        `*Location:* ${issue.mapsLink}\n` +
+        `*Report ID:* ${issue.id.slice(0, 8)}\n\n` +
+        `You'll receive updates as the status changes.`
+    );
+    return true;
+  }
+
+  if (result.status === "duplicates") {
+    const closest = result.duplicates[0];
+    if (closest.photoUrl) {
+      await sendWhatsAppImage(phone, closest.photoUrl, "Existing nearby report").catch((err) =>
+        console.error("Failed to send duplicate report photo", err)
+      );
+    }
+    await sendWhatsAppText(
+      phone,
+      `🔁 *Possible duplicate found*\n` +
+        `*Issue:* ${closest.title}\n` +
+        `*Reported:* ${closest.reportedAt}\n` +
+        `*Location:* ${closest.mapsLink}\n\n` +
+        `Is this the same issue you're seeing (see photo above)? Reply *yes* to add your vote instead of filing a new report, or tell me if it's different.`
+    );
+    return true;
+  }
+
+  // "incomplete" can't happen (checked before calling) and an error is
+  // better explained by the agent alongside whatever else it wants to say.
+  if (result.status === "error") {
+    console.error("Deterministic report filing failed", result.message);
+  }
+  return false;
+}
 
 async function sendMyReportsLink(phone: string): Promise<void> {
   const link = await createWhatsAppSessionLink(phone, "/my-reports");
@@ -384,6 +436,10 @@ async function handleMessage(message: WhatsAppMessage) {
     let userText: string | null = null;
     let isGreeting = false;
     let asksHowToReport = false;
+    // Free-text the citizen actually typed or spoke (not a synthesized
+    // "[they sent a photo]" note), eligible to be read as a bare answer to
+    // a pending location/name question further down.
+    let freeText: string | null = null;
 
     switch (message.type) {
       case "image": {
@@ -427,6 +483,7 @@ async function handleMessage(message: WhatsAppMessage) {
           }
 
           userText = transcript;
+          freeText = transcript;
           isGreeting = GREETING_RE.test(transcript);
           asksHowToReport = HOW_TO_REPORT_RE.test(transcript);
           const statedName = extractStatedName(transcript);
@@ -467,6 +524,7 @@ async function handleMessage(message: WhatsAppMessage) {
         }
 
         userText = body;
+        freeText = body;
         isGreeting = GREETING_RE.test(body);
         asksHowToReport = HOW_TO_REPORT_RE.test(body);
 
@@ -523,13 +581,54 @@ async function handleMessage(message: WhatsAppMessage) {
 
     // Independent reads — run concurrently instead of paying for two
     // sequential round-trips before the agent even starts.
-    const [profileId, session] = await Promise.all([
+    const [profileId, initialSession] = await Promise.all([
       getOrCreateProfileIdByPhone(phone),
       getReportSessionState(phone),
     ]);
     if (!profileId) {
       await sendWhatsAppText(phone, "Sorry, something went wrong setting up your account. Please try again.");
       return;
+    }
+
+    let session = initialSession;
+    // A bare "iilm university" / "ritvik" answering the bot's own question
+    // is the citizen supplying the location or their name. Resolve it here
+    // rather than trusting the agent to notice and call the tool — it
+    // demonstrably doesn't, and would then claim to have saved something it
+    // hadn't. Gated on a photo already being on file so this only ever
+    // fires mid-report, and skipped for greetings.
+    let resolvedNote = "";
+    if (freeText && session.hasPhoto && !isGreeting && (!session.hasLocation || !session.hasName)) {
+      const resolved = await resolvePendingReportInput({
+        text: freeText,
+        hasLocation: session.hasLocation,
+        hasName: session.hasName,
+      });
+      if (resolved?.kind === "location") {
+        const saved = await saveLocationToSession(
+          phone,
+          resolved.location.lat,
+          resolved.location.lng
+        );
+        if (saved.ok) {
+          session = { ...session, hasLocation: true };
+          resolvedNote = ` The location has JUST been saved from their message, resolved to "${resolved.location.formattedAddress}" — read that address back to them so they can catch a wrong pin, and do NOT call set_location_by_address again.`;
+        }
+      } else if (resolved?.kind === "name") {
+        await saveReporterNameToSession(phone, resolved.name);
+        session = { ...session, hasName: true };
+        resolvedNote = ` Their name has JUST been saved as "${resolved.name}" from their message — do NOT call set_reporter_name again.`;
+      }
+
+      // That answer may have been the last thing the report was waiting
+      // for. Filing is the whole point of the conversation and is not
+      // worth another coin-flip on whether the agent remembers to call
+      // file_new_report — it has been observed replying "Report filed!"
+      // with tools=[] — so complete it here and answer from a fixed
+      // template.
+      if (resolved && session.hasPhoto && session.hasLocation && session.hasName) {
+        if (await fileCompletedReport(phone)) return;
+      }
     }
 
     // A "hi" sent in the middle of an unfinished report shouldn't replay the
@@ -546,7 +645,7 @@ async function handleMessage(message: WhatsAppMessage) {
       session.hasPhoto ? "received" : "not yet received"
     }, location: ${session.hasLocation ? "received" : "not yet received"}, name: ${
       session.hasName ? "received" : "not yet received"
-    }, note: ${session.hasNote ? "received" : "none"}. ${
+    }, note: ${session.hasNote ? "received" : "none"}.${resolvedNote} ${
       showButtons
         ? "Quick-report buttons WILL be shown right below your reply — you may invite them to tap one."
         : "NO buttons will be shown below your reply — do not mention buttons or tapping anything."

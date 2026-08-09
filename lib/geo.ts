@@ -52,10 +52,31 @@ export async function reverseGeocode(
   return reverseGeocodeNominatim(lat, lng);
 }
 
+// How precisely the geocoder actually pinned the text it was given.
+// Because the search is country-biased to India, an unrecognizable query
+// doesn't fail — it silently collapses to the country centroid
+// ("narendra modi residence" and "ritvik" both return exactly "India").
+// Callers deciding whether a citizen's message really was a location need
+// to tell that apart from a genuine hit, which a null/non-null result
+// alone can't express.
+export type GeocodeSpecificity = "precise" | "locality" | "coarse";
+
 export interface GeocodedLocation {
   lat: number;
   lng: number;
   formattedAddress: string;
+  specificity: GeocodeSpecificity;
+}
+
+function googleSpecificity(types: string[]): GeocodeSpecificity {
+  if (types.includes("country")) return "coarse";
+  if (
+    types.includes("locality") ||
+    types.some((t) => t.startsWith("administrative_area_level_"))
+  ) {
+    return "locality";
+  }
+  return "precise";
 }
 
 async function forwardGeocodeGoogle(
@@ -78,10 +99,28 @@ async function forwardGeocodeGoogle(
       lat: result.geometry.location.lat,
       lng: result.geometry.location.lng,
       formattedAddress: result.formatted_address,
+      specificity: googleSpecificity(result.types ?? []),
     };
   } catch {
     return null;
   }
+}
+
+const NOMINATIM_COARSE = new Set(["country", "state"]);
+const NOMINATIM_LOCALITY = new Set([
+  "city",
+  "town",
+  "village",
+  "county",
+  "state_district",
+  "district",
+]);
+
+function nominatimSpecificity(addressType: string | undefined): GeocodeSpecificity {
+  if (!addressType) return "precise";
+  if (NOMINATIM_COARSE.has(addressType)) return "coarse";
+  if (NOMINATIM_LOCALITY.has(addressType)) return "locality";
+  return "precise";
 }
 
 async function forwardGeocodeNominatim(address: string): Promise<GeocodedLocation | null> {
@@ -94,7 +133,12 @@ async function forwardGeocodeNominatim(address: string): Promise<GeocodedLocatio
     const data = await res.json();
     const result = data[0];
     if (!result) return null;
-    return { lat: parseFloat(result.lat), lng: parseFloat(result.lon), formattedAddress: result.display_name };
+    return {
+      lat: parseFloat(result.lat),
+      lng: parseFloat(result.lon),
+      formattedAddress: result.display_name,
+      specificity: nominatimSpecificity(result.addresstype),
+    };
   } catch {
     return null;
   }
