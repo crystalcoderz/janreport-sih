@@ -18,9 +18,11 @@ import {
   saveReporterNameToSession,
   getReportSessionState,
   finalizeReportIfReady,
+  clearReportSession,
 } from "@/lib/whatsapp/report";
 import { extractStatedName } from "@/lib/whatsapp/name-detection";
 import { isLinkRequest } from "@/lib/whatsapp/link-request";
+import { isCancelRequest } from "@/lib/whatsapp/cancel-request";
 import { resolvePendingReportInput } from "@/lib/whatsapp/pending-input";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { createWhatsAppSessionLink } from "@/lib/whatsapp/session-link";
@@ -220,6 +222,22 @@ async function sendMyReportsLink(phone: string): Promise<void> {
       ? `📋 Here's your reports, opens signed in automatically:\n${link}`
       : "Could not create a link right now. Please try again."
   );
+}
+
+// Handles "cancel" / "never mind" deterministically rather than leaving it
+// to cancel_report — asked to call that tool on a bare "cancel" message,
+// the thinking-disabled model didn't call it at all (tools=[], confirmed
+// live: the session row was still there afterward). Only actually clears
+// anything when there's a report in progress, so "never mind" said about
+// something else in normal conversation doesn't silently eat state there
+// was nothing to eat.
+async function handleCancelRequest(phone: string, hasReportInProgress: boolean): Promise<void> {
+  if (!hasReportInProgress) {
+    await sendWhatsAppText(phone, "Nothing in progress to cancel — send a photo whenever you're ready to report something.");
+    return;
+  }
+  await clearReportSession(phone);
+  await sendWhatsAppText(phone, "No problem — I've cleared that. Send a new photo whenever you're ready.");
 }
 
 // Illustrated how-to card sent with each category template as its caption.
@@ -591,6 +609,15 @@ async function handleMessage(message: WhatsAppMessage) {
     }
 
     let session = initialSession;
+
+    if (freeText && isCancelRequest(freeText)) {
+      await handleCancelRequest(
+        phone,
+        session.hasPhoto || session.hasLocation || session.hasName
+      );
+      return;
+    }
+
     // A bare "iilm university" / "ritvik" answering the bot's own question
     // is the citizen supplying the location or their name. Resolve it here
     // rather than trusting the agent to notice and call the tool — it
@@ -619,16 +646,21 @@ async function handleMessage(message: WhatsAppMessage) {
         session = { ...session, hasName: true };
         resolvedNote = ` Their name has JUST been saved as "${resolved.name}" from their message — do NOT call set_reporter_name again.`;
       }
+    }
 
-      // That answer may have been the last thing the report was waiting
-      // for. Filing is the whole point of the conversation and is not
-      // worth another coin-flip on whether the agent remembers to call
-      // file_new_report — it has been observed replying "Report filed!"
-      // with tools=[] — so complete it here and answer from a fixed
-      // template.
-      if (resolved && session.hasPhoto && session.hasLocation && session.hasName) {
-        if (await fileCompletedReport(phone)) return;
-      }
+    // Whatever just happened this turn — a bare-reply location/name, a
+    // real GPS pin, or a name caught by the anchored "my name is X"
+    // regex earlier in the switch above — may have been the last thing
+    // the report was waiting for. Filing is the whole point of the
+    // conversation and is not worth another coin-flip on whether the
+    // agent remembers to call file_new_report — it has been observed
+    // replying "Report filed!" with tools=[] — so complete it here and
+    // answer from a fixed template whenever the set is actually
+    // complete, regardless of which path completed it. Skipped for
+    // greetings so a bare "hi" arriving after an old, already-complete
+    // session doesn't unexpectedly file it.
+    if (!isGreeting && session.hasPhoto && session.hasLocation && session.hasName) {
+      if (await fileCompletedReport(phone)) return;
     }
 
     // A "hi" sent in the middle of an unfinished report shouldn't replay the
