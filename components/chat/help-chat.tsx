@@ -27,6 +27,28 @@ const TOOL_LABELS: Record<string, string> = {
   get_city_stats: "Pulled city-wide stats",
 };
 
+// The model is told to answer in plain text, but it reaches for markdown
+// anyway ("You've filed **9 reports**"), and a chat bubble renders that
+// literally — asterisks and all. Convert the two things it actually emits
+// rather than pulling in a markdown renderer for a 4-sentence reply.
+function renderReply(text: string): React.ReactNode {
+  return text.split("\n").map((line, lineIndex) => (
+    <span key={lineIndex}>
+      {lineIndex > 0 && <br />}
+      {line
+        .replace(/^\s*[-*]\s+/, "• ")
+        .split(/(\*\*[^*\n]+\*\*)/g)
+        .map((part, i) =>
+          part.length > 4 && part.startsWith("**") && part.endsWith("**") ? (
+            <strong key={i}>{part.slice(2, -2)}</strong>
+          ) : (
+            part
+          )
+        )}
+    </span>
+  ));
+}
+
 export function HelpChat() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([GREETING]);
@@ -118,13 +140,13 @@ export function HelpChat() {
           >
             <div
               className={cn(
-                "max-w-[85%] rounded-lg px-3 py-2 text-sm",
+                "max-w-[85%] rounded-lg px-3 py-2 text-sm break-words whitespace-pre-wrap",
                 m.role === "user"
                   ? "bg-primary text-primary-foreground"
                   : "bg-secondary text-secondary-foreground"
               )}
             >
-              {m.content}
+              {m.role === "assistant" ? renderReply(m.content) : m.content}
             </div>
             {m.toolsUsed && m.toolsUsed.length > 0 && (
               <div className="flex flex-wrap gap-1.5">

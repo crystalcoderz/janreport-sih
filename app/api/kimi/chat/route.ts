@@ -15,7 +15,9 @@ What JanReport does:
 - WhatsApp: citizens can also report an issue by sending a photo and location directly to JanReport's WhatsApp number, or sign in via a WhatsApp OTP instead of email/password.
 - Each issue has a public discussion thread for comments from nearby residents.
 
-You have tools to look up the citizen's own reports, look up any specific issue by ID, find issues near a location, and pull city-wide stats — use them rather than guessing or telling the citizen to go check themselves. Never state a status or fact about a specific report without calling a tool to confirm it first.`;
+You have tools to look up the citizen's own reports, look up any specific issue by ID, find issues near a location, and pull city-wide stats — use them rather than guessing or telling the citizen to go check themselves. Never state a status or fact about a specific report without calling a tool to confirm it first.
+
+Answer in plain text. This renders in a small chat bubble, not a markdown viewer: no **bold**, no headings, no tables, no code fences. To list a few reports, put each on its own line starting with "- ".`;
 
 export async function POST(request: NextRequest) {
   if (!isKimiConfigured()) {
