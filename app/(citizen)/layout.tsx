@@ -9,6 +9,7 @@ const CITIZEN_LINKS: NavLink[] = [
   { href: "/map", labelKey: "nav.map" },
   { href: "/alerts", labelKey: "nav.alerts" },
   { href: "/volunteer", labelKey: "nav.volunteer" },
+  { href: "/leaderboard", labelKey: "nav.leaderboard" },
 ];
 
 export default async function CitizenLayout({
