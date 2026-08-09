@@ -21,12 +21,10 @@ export function AppNav({
   links,
   fullName,
   roleBadge,
-  notificationBell,
 }: {
   links: NavLink[];
   fullName: string | null;
   roleBadge?: string;
-  notificationBell?: React.ReactNode;
 }) {
   const pathname = usePathname();
   const { t } = useTranslation();
@@ -64,7 +62,6 @@ export function AppNav({
 
         <div className="hidden items-center gap-3 md:flex">
           {roleBadge && <Badge variant="outline">{roleBadge}</Badge>}
-          {notificationBell}
           <LanguageToggle />
           <span className="text-sm text-muted-foreground">{fullName}</span>
           <SignOutButton />
@@ -72,7 +69,6 @@ export function AppNav({
 
         <div className="flex items-center gap-1 md:hidden">
           {roleBadge && <Badge variant="outline">{roleBadge}</Badge>}
-          {notificationBell}
           <Button
             variant="ghost"
             size="icon"
