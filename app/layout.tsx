@@ -29,6 +29,12 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // The officer console adds a "dark" class here before React hydrates
+      // (see app/(officer)/layout.tsx) so its popups and toasts, which
+      // portal outside the layout, resolve dark. That is a deliberate
+      // server/client difference on this one attribute, not a bug worth
+      // warning about — same suppression next-themes documents.
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
         <LanguageProvider>
