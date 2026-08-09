@@ -4,6 +4,14 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 const OTP_TTL_MS = 10 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 60 * 1000;
 const MAX_ATTEMPTS = 5;
+// request-otp is public and unauthenticated — the per-phone cooldown below
+// doesn't stop one caller from fanning out across many different numbers,
+// and each successful send is a real billed WhatsApp message to whoever
+// that number belongs to. This bounds a single source regardless of how
+// many numbers it targets. Deliberately generous: carrier-grade NAT means
+// a whole neighborhood can share one public IP in India.
+const IP_WINDOW_MS = 60 * 60 * 1000;
+const MAX_PER_IP_PER_WINDOW = 10;
 
 export function normalizePhone(raw: string): string | null {
   const trimmed = raw.trim().replace(/[\s\-()]/g, "");
@@ -19,7 +27,8 @@ function hashCode(phone: string, code: string): string {
 }
 
 export async function issueOtp(
-  phone: string
+  phone: string,
+  ip: string | null
 ): Promise<{ ok: true; code: string } | { ok: false; error: string }> {
   const supabase = createServiceRoleClient();
 
@@ -42,11 +51,27 @@ export async function issueOtp(
     };
   }
 
+  if (ip) {
+    const { count } = await supabase
+      .from("whatsapp_otp_codes")
+      .select("id", { count: "exact", head: true })
+      .eq("ip", ip)
+      .gte("created_at", new Date(Date.now() - IP_WINDOW_MS).toISOString());
+
+    if ((count ?? 0) >= MAX_PER_IP_PER_WINDOW) {
+      return {
+        ok: false,
+        error: "Too many code requests from this network. Please try again later.",
+      };
+    }
+  }
+
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const { error } = await supabase.from("whatsapp_otp_codes").insert({
     phone,
     code_hash: hashCode(phone, code),
     expires_at: new Date(Date.now() + OTP_TTL_MS).toISOString(),
+    ip,
   });
 
   if (error) {

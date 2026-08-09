@@ -208,7 +208,12 @@ create table whatsapp_otp_codes (
   expires_at timestamptz not null,
   attempts smallint not null default 0,
   consumed_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Public, unauthenticated endpoint: the per-phone cooldown alone doesn't
+  -- stop one caller fanning out across many different numbers, and each
+  -- send is a real billed WhatsApp message to a third party. This backs a
+  -- per-IP rate limit in lib/whatsapp/otp.ts.
+  ip text
 );
 
 -- Scratch space for an in-progress "report an issue" conversation over
@@ -283,6 +288,8 @@ create index volunteer_groups_created_by_idx
   on volunteer_groups (created_by);
 create index whatsapp_otp_codes_phone_idx
   on whatsapp_otp_codes (phone, created_at desc);
+create index whatsapp_otp_codes_ip_created_at_idx
+  on whatsapp_otp_codes (ip, created_at);
 create index push_subscriptions_user_id_idx
   on push_subscriptions (user_id);
 

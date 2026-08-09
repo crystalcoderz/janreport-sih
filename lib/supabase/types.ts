@@ -390,6 +390,7 @@ export interface Database {
           attempts: number;
           consumed_at: string | null;
           created_at: string;
+          ip: string | null;
         };
         Insert: {
           id?: string;
@@ -399,6 +400,7 @@ export interface Database {
           attempts?: number;
           consumed_at?: string | null;
           created_at?: string;
+          ip?: string | null;
         };
         Update: Partial<
           Database["public"]["Tables"]["whatsapp_otp_codes"]["Insert"]
