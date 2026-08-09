@@ -809,6 +809,10 @@ create policy "issue_volunteer_offers_select_authenticated" on issue_volunteer_o
 create policy "issue_volunteer_offers_insert_own" on issue_volunteer_offers
   for insert to authenticated with check (offered_by = auth.uid());
 
+-- Accepting an offer is an officer's call. Letting the offerer write any
+-- status meant a citizen could mark their own offer accepted and then
+-- completed, and it would show on the officer's dashboard as approved
+-- work nobody approved. The offerer may only withdraw.
 create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volunteer_offers
   for update to authenticated using (
     offered_by = auth.uid()
@@ -817,11 +821,11 @@ create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volu
       where p.id = auth.uid() and p.role in ('officer', 'admin')
     )
   ) with check (
-    offered_by = auth.uid()
-    or exists (
+    exists (
       select 1 from profiles p
       where p.id = auth.uid() and p.role in ('officer', 'admin')
     )
+    or (offered_by = auth.uid() and status = 'withdrawn')
   );
 
 -- push_subscriptions: a citizen manages only their own devices. Fan-out
