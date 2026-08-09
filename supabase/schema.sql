@@ -385,9 +385,15 @@ create trigger trg_enforce_assigned_team_department
   execute function enforce_assigned_team_department();
 
 -- Keep issues.upvote_count in sync with issue_upvotes rows.
+-- SECURITY DEFINER because upvote_count is deliberately excluded from the
+-- authenticated role's column-level UPDATE grant below (so a citizen can't
+-- PATCH a vote count straight through PostgREST). Without it this trigger
+-- runs as the voting citizen and its own UPDATE is denied, which broke
+-- upvoting entirely with "permission denied for table issues".
 create function apply_upvote_delta()
 returns trigger
 language plpgsql
+security definer
 set search_path = public
 as $$
 begin

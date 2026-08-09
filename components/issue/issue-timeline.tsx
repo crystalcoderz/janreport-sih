@@ -1,4 +1,8 @@
+"use client";
+
 import { formatDistanceToNow } from "date-fns";
+import { useTranslation } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/translations";
 import type { IssueStatus } from "@/lib/supabase/types";
 
 export interface TimelineEntry {
@@ -16,12 +20,14 @@ export function IssueTimeline({
   createdAt: string;
   entries: TimelineEntry[];
 }) {
+  const { t } = useTranslation();
+
   return (
     <ol className="flex flex-col gap-4">
       <li className="flex gap-3">
         <div className="mt-1 size-2 shrink-0 rounded-full bg-primary" />
         <div>
-          <p className="text-sm font-medium">Reported</p>
+          <p className="text-sm font-medium">{t("status.reported")}</p>
           <p className="text-xs text-muted-foreground">
             {formatDistanceToNow(new Date(createdAt), { addSuffix: true })}
           </p>
@@ -31,8 +37,8 @@ export function IssueTimeline({
         <li key={entry.id} className="flex gap-3">
           <div className="mt-1 size-2 shrink-0 rounded-full bg-primary" />
           <div>
-            <p className="text-sm font-medium capitalize">
-              {entry.status.replace("_", " ")}
+            <p className="text-sm font-medium">
+              {t(`status.${entry.status}` as TranslationKey)}
             </p>
             {entry.note && (
               <p className="text-sm text-muted-foreground">{entry.note}</p>
