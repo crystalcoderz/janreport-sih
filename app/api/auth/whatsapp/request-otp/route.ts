@@ -4,6 +4,14 @@ import { isWhatsAppConfigured, sendWhatsAppOtpTemplate } from "@/lib/whatsapp/cl
 
 export const runtime = "nodejs";
 
+// Vercel's edge terminates TLS and forwards the real client address as the
+// first hop in x-forwarded-for — trustworthy here because it's Vercel's own
+// infrastructure setting it, not something a caller can spoof past the edge.
+function clientIp(request: NextRequest): string | null {
+  const forwarded = request.headers.get("x-forwarded-for");
+  return forwarded?.split(",")[0]?.trim() || null;
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const phone =
@@ -16,7 +24,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await issueOtp(phone);
+  const result = await issueOtp(phone, clientIp(request));
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 429 });
   }
