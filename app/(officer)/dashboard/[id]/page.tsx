@@ -13,7 +13,7 @@ import { IssueLocationMap } from "@/components/map/issue-location-map";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
 import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
 import { IssueComments } from "@/components/issue/issue-comments";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConsolePanel } from "@/components/dashboard/console-panel";
 import { MapPin, ThumbsUp, User } from "lucide-react";
 import { getCurrentProfile } from "@/lib/auth";
 
@@ -79,7 +79,7 @@ export default async function IssueDetailPage({
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={issue.status} />
           <SeverityBadge severity={issue.ai_severity} />
-          <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium">
+          <span className="inline-flex items-center rounded-sm border border-border/60 px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wide uppercase text-muted-foreground">
             {CATEGORY_LABELS[issue.ai_category as IssueCategory] ??
               issue.ai_category}
           </span>
@@ -118,16 +118,16 @@ export default async function IssueDetailPage({
           <span>{Math.round(issue.ai_confidence * 100)}% AI confidence</span>
         </div>
 
-        <Card className="overflow-hidden py-0">
+        <div
+          className="overflow-hidden rounded-lg border border-border/60"
+          style={{ filter: "invert(1) hue-rotate(180deg)" }}
+        >
           <IssueLocationMap issue={issue} />
-        </Card>
+        </div>
 
         {issue.resolution_photo_url && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Proof of resolution</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+          <ConsolePanel title="Proof of resolution">
+            <div className="flex flex-col gap-3">
               {issue.resolution_verdict && (
                 <ResolutionVerdictPanel
                   verdict={issue.resolution_verdict}
@@ -143,88 +143,63 @@ export default async function IssueDetailPage({
                 unoptimized
                 className="max-h-72 w-full rounded-lg object-cover"
               />
-            </CardContent>
-          </Card>
+            </div>
+          </ConsolePanel>
         )}
       </div>
 
       <div className="flex flex-col gap-4 lg:col-span-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Acknowledgement</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SendAcknowledgementButton
-              issueId={issue.id}
-              sentAt={issue.acknowledgement_sent_at}
-            />
-          </CardContent>
-        </Card>
+        <ConsolePanel title="Acknowledgement">
+          <SendAcknowledgementButton
+            issueId={issue.id}
+            sentAt={issue.acknowledgement_sent_at}
+          />
+        </ConsolePanel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Assigned crew</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AssignTeamForm
-              issueId={issue.id}
-              teams={eligibleTeams}
-              currentTeamId={issue.assigned_team_id}
-              currentTeamName={assignedTeam?.name}
-              currentTeamPhone={assignedTeam?.contact_phone}
-              assignedAt={issue.assigned_at}
-            />
-          </CardContent>
-        </Card>
+        <ConsolePanel title="Assigned crew">
+          <AssignTeamForm
+            issueId={issue.id}
+            teams={eligibleTeams}
+            currentTeamId={issue.assigned_team_id}
+            currentTeamName={assignedTeam?.name}
+            currentTeamPhone={assignedTeam?.contact_phone}
+            assignedAt={issue.assigned_at}
+          />
+        </ConsolePanel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Update status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <StatusUpdateForm issueId={issue.id} currentStatus={issue.status} />
-          </CardContent>
-        </Card>
+        <ConsolePanel title="Update status">
+          <StatusUpdateForm issueId={issue.id} currentStatus={issue.status} />
+        </ConsolePanel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Timeline</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <IssueTimeline
-              createdAt={issue.created_at}
-              entries={(history ?? []).map((h) => ({
-                id: h.id,
-                status: h.status,
-                note: h.note,
-                changed_at: h.changed_at,
-                officerName: (
-                  h as { profiles?: { full_name: string | null } }
-                ).profiles?.full_name,
-              }))}
-            />
-          </CardContent>
-        </Card>
+        <ConsolePanel title="Timeline">
+          <IssueTimeline
+            createdAt={issue.created_at}
+            entries={(history ?? []).map((h) => ({
+              id: h.id,
+              status: h.status,
+              note: h.note,
+              changed_at: h.changed_at,
+              officerName: (
+                h as { profiles?: { full_name: string | null } }
+              ).profiles?.full_name,
+            }))}
+          />
+        </ConsolePanel>
 
         {profile && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Discussion</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <IssueComments
-                issueId={issue.id}
-                userId={profile.id}
-                userFullName={profile.full_name}
-                initialComments={(comments ?? []).map((c) => ({
-                  ...c,
-                  authorName: (
-                    c as { profiles?: { full_name: string | null } }
-                  ).profiles?.full_name ?? null,
-                }))}
-              />
-            </CardContent>
-          </Card>
+          <ConsolePanel title="Discussion">
+            <IssueComments
+              issueId={issue.id}
+              userId={profile.id}
+              userFullName={profile.full_name}
+              initialComments={(comments ?? []).map((c) => ({
+                ...c,
+                authorName: (
+                  c as { profiles?: { full_name: string | null } }
+                ).profiles?.full_name ?? null,
+              }))}
+            />
+          </ConsolePanel>
         )}
       </div>
     </div>
