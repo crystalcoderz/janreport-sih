@@ -12,10 +12,12 @@ import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const DEDUPE_RADIUS_M = 75;
-// How many nearby candidates get a vision comparison. Beyond a
-// handful the extra latency is paid on every single report while the
-// odds of the real match sitting further down the list are slim.
-const MAX_DEDUPE_CANDIDATES = 3;
+// How many nearby candidates get a vision comparison. Each one is a
+// separate Gemini call on top of the classification the same report
+// already paid for, and the Gemini free tier allows only 5 requests per
+// minute per model — so this is a quota budget as much as a latency one.
+// The real match is almost always the most recent nearby report anyway.
+const MAX_DEDUPE_CANDIDATES = 2;
 
 // Jharkhand's timezone — the app has no other locale/timezone setting, so
 // this keeps "reported at" times readable for citizens instead of UTC.

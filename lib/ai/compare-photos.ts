@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { withAiRetry } from "@/lib/ai/retry";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -73,9 +74,7 @@ async function fetchAsInlineData(
 }
 
 // Returns null when the comparison could not be made at all (candidate
-// photo missing, unreadable, or the model call failed). Callers decide what
-// an unknown means — dedupe treats it as "still a candidate", so a flaky
-// call can never cause a real duplicate to be filed silently.
+// photo missing, unreadable, or the model still failing after retries).
 export async function comparePhotosForDuplicate(params: {
   newImageBase64: string;
   newMimeType: string;
@@ -91,30 +90,32 @@ export async function comparePhotosForDuplicate(params: {
   if (!candidate) return null;
 
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: [
-        { text: "Photo A (new report):" },
-        { inlineData: { mimeType: params.newMimeType, data: params.newImageBase64 } },
-        { text: "Photo B (existing open report):" },
-        { inlineData: { mimeType: candidate.mimeType, data: candidate.data } },
-        { text: PROMPT },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-      },
+    return await withAiRetry("Duplicate photo comparison", async () => {
+      const response = await ai.models.generateContent({
+        model: MODEL,
+        contents: [
+          { text: "Photo A (new report):" },
+          { inlineData: { mimeType: params.newMimeType, data: params.newImageBase64 } },
+          { text: "Photo B (existing open report):" },
+          { inlineData: { mimeType: candidate.mimeType, data: candidate.data } },
+          { text: PROMPT },
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: RESPONSE_SCHEMA,
+        },
+      });
+
+      const text = response.text;
+      if (!text) throw new Error("comparison returned no structured result");
+
+      const parsed = JSON.parse(text) as PhotoComparison;
+      return {
+        sameIssue: Boolean(parsed.sameIssue),
+        confidence: Math.min(1, Math.max(0, parsed.confidence)),
+        reason: parsed.reason,
+      };
     });
-
-    const text = response.text;
-    if (!text) return null;
-
-    const parsed = JSON.parse(text) as PhotoComparison;
-    return {
-      sameIssue: Boolean(parsed.sameIssue),
-      confidence: Math.min(1, Math.max(0, parsed.confidence)),
-      reason: parsed.reason,
-    };
   } catch (err) {
     console.error("Duplicate photo comparison failed", err);
     return null;
@@ -122,7 +123,13 @@ export async function comparePhotosForDuplicate(params: {
 }
 
 export function isConfirmedDuplicate(comparison: PhotoComparison | null): boolean {
-  // Unknown (null) stays a candidate — see comparePhotosForDuplicate.
-  if (!comparison) return true;
+  // An unknown verdict (retries exhausted, or no candidate photo to look at)
+  // deliberately does NOT count as a duplicate. Treating it as one would
+  // hand the citizen back the exact behaviour this comparison exists to
+  // remove — "same category within 75m" — every time Gemini is busy, which
+  // is precisely when a 503 makes that likely. Filing an extra report is
+  // recoverable by an officer; blocking a citizen mid-report to argue about
+  // a photo of somewhere else is not.
+  if (!comparison) return false;
   return comparison.sameIssue && comparison.confidence >= MIN_CONFIDENCE;
 }
