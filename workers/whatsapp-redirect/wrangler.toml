@@ -1,0 +1,11 @@
+name = "janreport-whatsapp-redirect"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+routes = [
+  { pattern = "janreport.xyz", custom_domain = true },
+  { pattern = "www.janreport.xyz", custom_domain = true },
+]
+
+# Account this deploys to (the login has several).
+account_id = "b260785c40a4cedd632f4594a7c56b08"
