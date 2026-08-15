@@ -1,7 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+import { getAiClient, AI_MODEL } from "@/lib/ai/client";
 
 // Transcribes a WhatsApp voice note so it can be fed into the same
 // userText pipeline as a typed message — report filing, status lookups,
@@ -11,8 +8,8 @@ export async function transcribeAudio(params: {
   audioBase64: string;
   mimeType: string;
 }): Promise<string> {
-  const response = await ai.models.generateContent({
-    model: MODEL,
+  const response = await getAiClient().models.generateContent({
+    model: AI_MODEL,
     contents: [
       {
         inlineData: {

@@ -1,13 +1,7 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
+import { getAiClient, AI_MODEL } from "@/lib/ai/client";
 import { ISSUE_CATEGORIES, type IssueCategory } from "@/lib/departments";
 import { withAiRetry } from "@/lib/ai/retry";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-// "-latest" alias tracks the current Flash model, so this doesn't rot the
-// way a pinned version does (gemini-2.5-flash is already 404 for new API
-// keys). Still overridable per-environment.
-const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 
 export interface ClassificationResult {
   category: IssueCategory;
@@ -78,8 +72,8 @@ async function classifyOnce(params: {
   mimeType: string;
   note?: string;
 }): Promise<ClassificationResult> {
-  const response = await ai.models.generateContent({
-    model: MODEL,
+  const response = await getAiClient().models.generateContent({
+    model: AI_MODEL,
     contents: [
       {
         inlineData: {

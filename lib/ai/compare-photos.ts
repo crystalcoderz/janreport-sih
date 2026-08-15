@@ -1,9 +1,6 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
+import { getAiClient, AI_MODEL } from "@/lib/ai/client";
 import { withAiRetry } from "@/lib/ai/retry";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 
 // Candidate photos come from our own storage (Supabase/R2 public URLs), but
 // they are still fetched over the network, so cap what we are willing to
@@ -91,8 +88,8 @@ export async function comparePhotosForDuplicate(params: {
 
   try {
     return await withAiRetry("Duplicate photo comparison", async () => {
-      const response = await ai.models.generateContent({
-        model: MODEL,
+      const response = await getAiClient().models.generateContent({
+        model: AI_MODEL,
         contents: [
           { text: "Photo A (new report):" },
           { inlineData: { mimeType: params.newMimeType, data: params.newImageBase64 } },
