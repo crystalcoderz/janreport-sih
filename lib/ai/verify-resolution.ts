@@ -1,10 +1,8 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { isAllowedPhotoUrl } from "@/lib/storage";
+import { getAiClient, AI_MODEL } from "@/lib/ai/client";
 import type { ResolutionVerdict } from "@/lib/supabase/types";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
@@ -89,8 +87,8 @@ export async function verifyResolution(params: {
   const categoryLabel =
     CATEGORY_LABELS[params.category as IssueCategory] ?? params.category;
 
-  const response = await ai.models.generateContent({
-    model: MODEL,
+  const response = await getAiClient().models.generateContent({
+    model: AI_MODEL,
     contents: [
       { text: "BEFORE photo — the issue as originally reported by a citizen:" },
       { inlineData: { mimeType: before.mimeType, data: before.data } },

@@ -100,6 +100,7 @@ export const en = {
     "Spotted a civic issue? Report it and track its resolution here.",
   "myReports.emptyCta": "Report an issue",
   "myReports.enableNotifications": "Enable notifications",
+  "myReports.unassigned": "Not yet assigned",
   "myReports.dashboardCta": "Open officer dashboard",
   "myReports.mapCta": "See every report on the map",
 
@@ -213,6 +214,7 @@ export const hi: Partial<Record<TranslationKey, string>> = {
     "कोई नागरिक समस्या दिखी? उसे यहां दर्ज करें और समाधान ट्रैक करें।",
   "myReports.emptyCta": "समस्या दर्ज करें",
   "myReports.enableNotifications": "सूचनाएं सक्षम करें",
+  "myReports.unassigned": "अभी आवंटित नहीं",
   "myReports.dashboardCta": "अधिकारी डैशबोर्ड खोलें",
   "myReports.mapCta": "सभी रिपोर्ट मानचित्र पर देखें",
 

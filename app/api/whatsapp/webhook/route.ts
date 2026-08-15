@@ -139,7 +139,14 @@ async function claimMessage(messageId: string | undefined): Promise<boolean> {
 
 // Played before the agent's text reply whenever the citizen sends a
 // greeting — every time, not just their first ever message.
-const GREETING_RE = /^(hi+|hello+|hey+|namaste|start|help)\b/i;
+// Whole-message, not a prefix. As a prefix this swallowed everything the
+// citizen actually said: "Hi, there is a huge pothole outside my house" was
+// answered with the canned welcome and the message body was dropped on the
+// floor — unrecoverably, since no conversation history is kept, so it never
+// reached the model on any later turn either. Trailing punctuation and a
+// trailing "there"/"bot" still count as a bare greeting.
+const GREETING_RE =
+  /^(hi+|hello+|hey+|namaste|start|help)(\s+(there|bot|janreport))?[\s!.,?]*$/i;
 
 // "How do I report?" in the phrasings citizens actually use, English and
 // romanized Hindi. These don't get the full welcome (poster + voice
@@ -458,6 +465,14 @@ async function handleMessage(message: WhatsAppMessage) {
     // "[they sent a photo]" note), eligible to be read as a bare answer to
     // a pending location/name question further down.
     let freeText: string | null = null;
+    // Did THIS message actually add a photo, location or name to the
+    // session? Only then is deterministic filing appropriate. Without this,
+    // a session left complete-but-unfiled (the duplicate prompt returns
+    // before the session is cleared) re-entered the filing path on every
+    // subsequent message, re-ran the dedupe check, and replied with the same
+    // "Possible duplicate found" prompt again — so the citizen's "yes" or
+    // "no, it's different" was never read by anything.
+    let sessionAdvanced = false;
 
     switch (message.type) {
       case "image": {
@@ -469,6 +484,7 @@ async function handleMessage(message: WhatsAppMessage) {
           await sendWhatsAppText(phone, saved.error);
           return;
         }
+        sessionAdvanced = true;
         if (message.image.caption) {
           await saveNoteToSession(phone, message.image.caption);
           const statedName = extractStatedName(message.image.caption);
@@ -507,6 +523,7 @@ async function handleMessage(message: WhatsAppMessage) {
           const statedName = extractStatedName(transcript);
           if (statedName) {
             await saveReporterNameToSession(phone, statedName);
+            sessionAdvanced = true;
           }
         } catch (err) {
           console.error("Failed to transcribe voice note", err);
@@ -529,6 +546,7 @@ async function handleMessage(message: WhatsAppMessage) {
           await sendWhatsAppText(phone, saved.error);
           return;
         }
+        sessionAdvanced = true;
         userText = "[The citizen just shared their location.]";
         break;
       }
@@ -549,6 +567,7 @@ async function handleMessage(message: WhatsAppMessage) {
         const statedName = extractStatedName(body);
         if (statedName) {
           await saveReporterNameToSession(phone, statedName);
+          sessionAdvanced = true;
         }
         break;
       }
@@ -639,11 +658,13 @@ async function handleMessage(message: WhatsAppMessage) {
         );
         if (saved.ok) {
           session = { ...session, hasLocation: true };
+          sessionAdvanced = true;
           resolvedNote = ` The location has JUST been saved from their message, resolved to "${resolved.location.formattedAddress}" — read that address back to them so they can catch a wrong pin, and do NOT call set_location_by_address again.`;
         }
       } else if (resolved?.kind === "name") {
         await saveReporterNameToSession(phone, resolved.name);
         session = { ...session, hasName: true };
+        sessionAdvanced = true;
         resolvedNote = ` Their name has JUST been saved as "${resolved.name}" from their message — do NOT call set_reporter_name again.`;
       }
     }
@@ -659,7 +680,13 @@ async function handleMessage(message: WhatsAppMessage) {
     // complete, regardless of which path completed it. Skipped for
     // greetings so a bare "hi" arriving after an old, already-complete
     // session doesn't unexpectedly file it.
-    if (!isGreeting && session.hasPhoto && session.hasLocation && session.hasName) {
+    if (
+      !isGreeting &&
+      sessionAdvanced &&
+      session.hasPhoto &&
+      session.hasLocation &&
+      session.hasName
+    ) {
       if (await fileCompletedReport(phone)) return;
     }
 

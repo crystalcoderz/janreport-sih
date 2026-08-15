@@ -351,12 +351,16 @@ export async function finalizeReportIfReady(
     .select("*, departments(name)")
     .single();
 
-  await supabase.from("whatsapp_report_sessions").delete().eq("phone", phone);
-
   if (insertError || !issue) {
+    // Deliberately before the delete below: clearing the session on a failed
+    // insert destroys the photo, location and name the citizen already sent,
+    // with nothing to recover them from. Keeping the row means "try again"
+    // is actually possible instead of being advice they cannot follow.
     console.error("WhatsApp issue insert failed", insertError);
     return { status: "error", message: "Could not save your report. Please try again." };
   }
+
+  await supabase.from("whatsapp_report_sessions").delete().eq("phone", phone);
 
   await pushNearbyIssueAlerts(issue.id);
 

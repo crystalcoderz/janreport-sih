@@ -186,7 +186,7 @@ export function MyReportsClient({
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {t(categoryKey(issue.ai_category))}{" "}
-                  · {issue.departments?.name ?? "Unassigned"}
+                  · {issue.departments?.name ?? t("myReports.unassigned")}
                 </p>
                 <div className="mt-1 flex items-center gap-2">
                   <SeverityBadge severity={issue.ai_severity} />
