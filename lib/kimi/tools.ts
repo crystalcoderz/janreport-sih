@@ -207,17 +207,18 @@ export const WHATSAPP_TOOL_DEFINITIONS = [
   },
 ] as const;
 
+const MY_REPORTS_LIMIT = 20;
+
 async function getMyReports(ctx: ToolContext, args: { status?: IssueStatus }) {
   let query = ctx.supabase
     .from("issues")
     .select("id, title, ai_category, status, ai_severity, created_at, departments(name)")
     .eq("reporter_id", ctx.userId)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(MY_REPORTS_LIMIT);
 
   if (args.status) query = query.eq("status", args.status);
 
-  const LIMIT = 20;
   const { data, error } = await query;
   if (error) return { error: error.message };
   if (!data || data.length === 0) return { reports: [], note: "No reports found." };
@@ -235,7 +236,7 @@ async function getMyReports(ctx: ToolContext, args: { status?: IssueStatus }) {
     // Tells the agent there may be older reports it isn't seeing, so it
     // doesn't conclude "no report about X" from a truncated window —
     // it should narrow by status or ask the citizen which report they mean.
-    truncated: data.length >= LIMIT,
+    truncated: data.length >= MY_REPORTS_LIMIT,
   };
 }
 
