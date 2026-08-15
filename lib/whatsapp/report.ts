@@ -1,5 +1,9 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { classifyIssuePhoto } from "@/lib/ai/classify";
+import {
+  comparePhotosForDuplicate,
+  isConfirmedDuplicate,
+} from "@/lib/ai/compare-photos";
 import { reverseGeocode, forwardGeocode, googleMapsLink } from "@/lib/geo";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { getOrCreateProfileByPhone } from "@/lib/whatsapp/profile";
@@ -8,6 +12,10 @@ import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const DEDUPE_RADIUS_M = 75;
+// How many nearby candidates get a vision comparison. Beyond a
+// handful the extra latency is paid on every single report while the
+// odds of the real match sitting further down the list are slim.
+const MAX_DEDUPE_CANDIDATES = 3;
 
 // Jharkhand's timezone — the app has no other locale/timezone setting, so
 // this keeps "reported at" times readable for citizens instead of UTC.
@@ -241,19 +249,56 @@ export async function finalizeReportIfReady(
     if (nearbyError) {
       console.error("WhatsApp dedupe lookup failed", nearbyError);
     } else if (nearby && nearby.length > 0) {
-      return {
-        status: "duplicates",
-        category: CATEGORY_LABELS[classification.category as IssueCategory] ?? classification.category,
-        severity: classification.severityLabel,
-        duplicates: nearby.map((n) => ({
-          id: n.id,
-          title: n.title,
-          address: n.address,
-          photoUrl: n.photo_url,
-          mapsLink: googleMapsLink(n.lat, n.lng),
-          reportedAt: formatIstDateTime(n.created_at),
-        })),
-      };
+      // Same category within 75m is only a *candidate* — on its own it
+      // matched a photo of a floor against an unrelated "no visible issue"
+      // report and asked the citizen to confirm a duplicate that shared
+      // nothing but a map pin. Confirm visually before interrupting them.
+      // Bounded to the few most recent candidates and run concurrently, so
+      // this costs one round of vision calls rather than one per nearby
+      // report.
+      const candidates = nearby.slice(0, MAX_DEDUPE_CANDIDATES);
+      // Read out of `session` before the closure — the non-null narrowing
+      // from the completeness guard above doesn't survive into a callback.
+      const photoBase64 = session.photo_base64;
+      const photoMimeType = session.photo_mime_type ?? "image/jpeg";
+      const comparisons = await Promise.all(
+        candidates.map((n) =>
+          n.photo_url
+            ? comparePhotosForDuplicate({
+                newImageBase64: photoBase64,
+                newMimeType: photoMimeType,
+                candidateImageUrl: n.photo_url,
+              })
+            : Promise.resolve(null)
+        )
+      );
+
+      const confirmed = candidates.filter((n, i) => {
+        const verdict = comparisons[i];
+        if (verdict) {
+          console.log(
+            `[whatsapp dedupe] ${n.id}: sameIssue=${verdict.sameIssue} confidence=${verdict.confidence} — ${verdict.reason}`
+          );
+        }
+        return isConfirmedDuplicate(verdict);
+      });
+
+      if (confirmed.length > 0) {
+        return {
+          status: "duplicates",
+          category: CATEGORY_LABELS[classification.category as IssueCategory] ?? classification.category,
+          severity: classification.severityLabel,
+          duplicates: confirmed.map((n) => ({
+            id: n.id,
+            title: n.title,
+            address: n.address,
+            photoUrl: n.photo_url,
+            mapsLink: googleMapsLink(n.lat, n.lng),
+            reportedAt: formatIstDateTime(n.created_at),
+          })),
+        };
+      }
+      // Nothing visually matched — fall through and file it as a new report.
     }
   }
 

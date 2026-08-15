@@ -148,6 +148,16 @@ export async function sendWhatsAppOtpTemplate(to: string, code: string) {
         language: { code: "en_US" },
         components: [
           { type: "body", parameters: [{ type: "text", text: code }] },
+          // Authentication templates carry a copy-code/autofill button, and
+          // Meta requires the code repeated as that button's parameter —
+          // sending only the body fails the whole message on a parameter
+          // count mismatch rather than just dropping the button.
+          {
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: code }],
+          },
         ],
       },
     }),

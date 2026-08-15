@@ -60,7 +60,37 @@ function severityLabel(score: number): string {
   return "Minimal";
 }
 
+// Gemini fails transiently often enough to matter here — a 429, a 503, or
+// an empty/truncated response. By the time this runs on WhatsApp the
+// citizen has already sent a photo, a location and their name, and a single
+// throw discards all of it and asks them to start over with a photo the
+// server is in fact still holding. Retry briefly before giving up.
+const CLASSIFY_ATTEMPTS = 3;
+const CLASSIFY_RETRY_DELAY_MS = 700;
+
 export async function classifyIssuePhoto(params: {
+  imageBase64: string;
+  mimeType: string;
+  note?: string;
+}): Promise<ClassificationResult> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= CLASSIFY_ATTEMPTS; attempt++) {
+    try {
+      return await classifyOnce(params);
+    } catch (err) {
+      lastError = err;
+      if (attempt < CLASSIFY_ATTEMPTS) {
+        console.warn(`AI classification attempt ${attempt} failed, retrying`, err);
+        await new Promise((resolve) =>
+          setTimeout(resolve, CLASSIFY_RETRY_DELAY_MS * attempt)
+        );
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function classifyOnce(params: {
   imageBase64: string;
   mimeType: string;
   note?: string;
