@@ -14,7 +14,7 @@ import Link from "next/link";
 import type { Database } from "@/lib/supabase/types";
 import { toast } from "sonner";
 import { useNotificationPermission } from "@/lib/hooks/use-notification-permission";
-import { Bell } from "lucide-react";
+import { ArrowRight, Bell } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/translations";
 
@@ -33,10 +33,12 @@ export function MyReportsClient({
   initialIssues,
   history,
   userId,
+  isStaff,
 }: {
   initialIssues: Issue[];
   history: HistoryRow[];
   userId: string;
+  isStaff: boolean;
 }) {
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>(history);
@@ -111,15 +113,35 @@ export function MyReportsClient({
     return map;
   }, [historyRows]);
 
+  // Officers land here from the same nav as citizens, so the footer link
+  // sends each to the overview they can actually open.
+  const footerLink = (
+    <div className="flex justify-center border-t pt-6">
+      <Button
+        variant="outline"
+        nativeButton={false}
+        render={
+          <Link href={isStaff ? "/dashboard" : "/map"}>
+            {isStaff ? t("myReports.dashboardCta") : t("myReports.mapCta")}
+            <ArrowRight className="size-4" />
+          </Link>
+        }
+      />
+    </div>
+  );
+
   if (issues.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-3 py-20 text-center">
-        <p className="text-lg font-medium">{t("myReports.emptyTitle")}</p>
-        <p className="text-muted-foreground">{t("myReports.emptyDescription")}</p>
-        <Button
-          nativeButton={false}
-          render={<Link href="/report">{t("myReports.emptyCta")}</Link>}
-        />
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col items-center gap-3 py-20 text-center">
+          <p className="text-lg font-medium">{t("myReports.emptyTitle")}</p>
+          <p className="text-muted-foreground">{t("myReports.emptyDescription")}</p>
+          <Button
+            nativeButton={false}
+            render={<Link href="/report">{t("myReports.emptyCta")}</Link>}
+          />
+        </div>
+        {footerLink}
       </div>
     );
   }
@@ -140,34 +162,39 @@ export function MyReportsClient({
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {issues.map((issue) => (
-          <Card key={issue.id}>
+          <Card key={issue.id} className="overflow-hidden pt-0">
+            {/* The photo is the thing the citizen actually recognises their
+                own report by, so it leads the card rather than sitting in a
+                thumbnail. `unoptimized` is required: next.config.ts sets no
+                images.remotePatterns, and photos are served from Supabase
+                storage / R2 / picsum. */}
+            <div className="relative aspect-video w-full bg-muted">
+              <Image
+                src={issue.photo_url}
+                alt={issue.title}
+                fill
+                unoptimized
+                sizes="(min-width: 768px) 50vw, 100vw"
+                className="object-cover"
+              />
+            </div>
             <CardContent className="flex flex-col gap-4 pt-6">
-              <div className="flex gap-3">
-                <Image
-                  src={issue.photo_url}
-                  alt={issue.title}
-                  width={80}
-                  height={80}
-                  unoptimized
-                  className="size-20 shrink-0 rounded-md object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate font-medium">{issue.title}</p>
-                    <StatusBadge status={issue.status} />
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {t(categoryKey(issue.ai_category))}{" "}
-                    · {issue.departments?.name ?? "Unassigned"}
-                  </p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <SeverityBadge severity={issue.ai_severity} />
-                    <span className="text-xs text-muted-foreground">
-                      {formatDistanceToNow(new Date(issue.created_at), {
-                        addSuffix: true,
-                      })}
-                    </span>
-                  </div>
+              <div className="flex flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="min-w-0 flex-1 truncate font-medium">{issue.title}</p>
+                  <StatusBadge status={issue.status} />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {t(categoryKey(issue.ai_category))}{" "}
+                  · {issue.departments?.name ?? "Unassigned"}
+                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <SeverityBadge severity={issue.ai_severity} />
+                  <span className="text-xs text-muted-foreground">
+                    {formatDistanceToNow(new Date(issue.created_at), {
+                      addSuffix: true,
+                    })}
+                  </span>
                 </div>
               </div>
               {issue.resolution_verdict && (
@@ -185,6 +212,7 @@ export function MyReportsClient({
           </Card>
         ))}
       </div>
+      {footerLink}
     </div>
   );
 }

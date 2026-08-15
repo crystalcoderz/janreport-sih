@@ -25,11 +25,21 @@ export default async function MyReportsPage() {
         .order("changed_at", { ascending: true })
     : { data: [] };
 
+  // Decides where the footer link points. The officer dashboard is behind
+  // the (officer) route group, so offering it to a citizen would just
+  // bounce them to /login — they get the public map instead.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
   return (
     <MyReportsClient
       initialIssues={issues ?? []}
       history={history ?? []}
       userId={user.id}
+      isStaff={profile?.role === "officer" || profile?.role === "admin"}
     />
   );
 }
