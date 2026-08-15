@@ -21,6 +21,20 @@ describe("isLinkRequest", () => {
     expect(isLinkRequest("Magic Link please")).toBe(true);
   });
 
+  it("catches a bare link reply to the bot's own offer", () => {
+    // The real conversation that looped: the bot offered a link and none of
+    // these reached the deterministic handler.
+    expect(isLinkRequest("Yes link")).toBe(true);
+    expect(isLinkRequest("Link of existing")).toBe(true);
+    expect(isLinkRequest("link")).toBe(true);
+    expect(isLinkRequest("links")).toBe(true);
+  });
+
+  it("ignores a link road, which is a road and not a request", () => {
+    expect(isLinkRequest("pothole on the link road near my house")).toBe(false);
+    expect(isLinkRequest("Link Road is flooded")).toBe(false);
+  });
+
   it("does not fire on unrelated messages", () => {
     expect(isLinkRequest("there is a pothole near my house")).toBe(false);
     expect(isLinkRequest("what is the status of my report")).toBe(false);
