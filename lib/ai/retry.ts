@@ -36,7 +36,10 @@ export async function withAiRetry<T>(
         // Linear backoff — these outages clear in seconds, and the citizen
         // is sitting in a WhatsApp chat waiting for the reply, so there is
         // no room for a long exponential tail.
-        await new Promise((resolve) => setTimeout(resolve, BASE_DELAY_MS * attempt));
+        // Full jitter. Without it, several requests that fail on the same
+        // upstream blip retry in lockstep and hit it together again.
+        const backoff = BASE_DELAY_MS * attempt * (0.5 + Math.random());
+        await new Promise((resolve) => setTimeout(resolve, backoff));
       }
     }
   }

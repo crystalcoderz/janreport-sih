@@ -13,6 +13,10 @@ export const runtime = "nodejs";
 
 const DEDUPE_RADIUS_M = 75;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+// Report creation is the one public write that spends money (a Gemini vision
+// call per attempt), so it gets a ceiling now that the link is public.
+const REPORT_WINDOW_MS = 60 * 60 * 1000;
+const MAX_REPORTS_PER_WINDOW = 10;
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -67,6 +71,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "That file doesn't look like a real JPEG, PNG, or WebP image." },
       { status: 400 }
+    );
+  }
+
+  // Deliberately the last check before the AI call, and deliberately after
+  // the cheap validation above: classification is the only step here that
+  // costs money, so a caller looping this endpoint bills us on every request
+  // whether or not a row is ever written. Counted from `issues` itself
+  // rather than a rate-limit table, so this needs no migration. Generous
+  // enough that a genuine reporter walking a street never notices.
+  const { count: recentByUser } = await supabase
+    .from("issues")
+    .select("id", { count: "exact", head: true })
+    .eq("reporter_id", user.id)
+    .gte("created_at", new Date(Date.now() - REPORT_WINDOW_MS).toISOString());
+
+  if ((recentByUser ?? 0) >= MAX_REPORTS_PER_WINDOW) {
+    return NextResponse.json(
+      {
+        error:
+          "You've filed a lot of reports in the last hour. Please try again shortly.",
+      },
+      { status: 429 }
     );
   }
 

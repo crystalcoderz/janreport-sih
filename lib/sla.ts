@@ -10,12 +10,14 @@ export const SLA_HOURS: { maxSeverity: number; hours: number }[] = [
   { maxSeverity: 4, hours: 168 }, // low (<=4): one week
 ];
 
+// Sorted once at module load. This used to clone and sort on every call, and
+// the dashboard calls it from inside a sort comparator, so the work was
+// quadratic in the number of issues on screen for a list that never changes.
+const SLA_ASCENDING = [...SLA_HOURS].sort((a, b) => a.maxSeverity - b.maxSeverity);
+
 export function slaHoursFor(severity: number): number {
-  // Ordered high→low; first bucket whose ceiling still covers this score.
-  const match = [...SLA_HOURS]
-    .sort((a, b) => a.maxSeverity - b.maxSeverity)
-    .find((b) => severity <= b.maxSeverity);
-  return match?.hours ?? 168;
+  // Ordered low→high; first bucket whose ceiling still covers this score.
+  return SLA_ASCENDING.find((b) => severity <= b.maxSeverity)?.hours ?? 168;
 }
 
 // "Overdue" only applies while an issue is still awaiting action —

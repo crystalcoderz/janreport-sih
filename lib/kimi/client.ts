@@ -17,7 +17,13 @@ export function isKimiConfigured(): boolean {
 // Exposed for lib/kimi/agent.ts, which needs the raw client to drive its
 // own tool-calling loop. kimiChat() below stays the simple text-only path
 // for the one-shot features (briefing, note drafting).
-export const kimi = apiKey ? new OpenAI({ apiKey, baseURL }) : null;
+// maxRetries/timeout are explicit because the SDK defaults (2 retries, 10
+// minute timeout) turn a Moonshot rate-limit into a lambda pinned for
+// minutes while the citizen waits on a WhatsApp reply that will never come.
+// Failing fast surfaces the throttle instead of hiding it.
+export const kimi = apiKey
+  ? new OpenAI({ apiKey, baseURL, maxRetries: 1, timeout: 20_000 })
+  : null;
 
 export interface KimiMessage {
   role: "system" | "user" | "assistant";

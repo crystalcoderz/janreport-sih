@@ -98,8 +98,18 @@ export async function POST(request: NextRequest) {
     console.warn("[whatsapp webhook] could not parse request body as JSON");
     return NextResponse.json({ ok: true });
   }
-  const messages: WhatsAppMessage[] =
-    payload?.entry?.[0]?.changes?.[0]?.value?.messages ?? [];
+  // Meta batches deliveries as soon as its webhook queue backs up, putting
+  // several entries — and several changes per entry — in one POST. Reading
+  // only [0][0] silently dropped every message after the first while still
+  // answering 200, so Meta never retried them: the citizen's photo or
+  // location simply vanished with nothing in the logs.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Meta's envelope, narrowed by the optional chaining below
+  const messages: WhatsAppMessage[] = ((payload?.entry ?? []) as any[]).flatMap(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- as above
+    (entry: any) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- as above
+      ((entry?.changes ?? []) as any[]).flatMap((change: any) => change?.value?.messages ?? [])
+  );
 
   // Meta expects a 200 within a few seconds and retries the whole delivery
   // if it doesn't get one. An agent turn can take 10-15s (LLM + tool

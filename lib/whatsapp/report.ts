@@ -141,7 +141,12 @@ export async function getReportSessionState(phone: string): Promise<{
   const supabase = createServiceRoleClient();
   const { data: session } = await supabase
     .from("whatsapp_report_sessions")
-    .select("photo_base64, lat, lng, note, reporter_name, updated_at")
+    // Deliberately NOT photo_base64: this runs on every inbound message and
+    // the column holds the whole image, so selecting it shipped ~270 KB out
+    // of Postgres per turn purely to test it for null. photo_mime_type is
+    // written in the same statement as the photo and never without it, so it
+    // answers "is there a photo?" for a few bytes.
+    .select("photo_mime_type, lat, lng, note, reporter_name, updated_at")
     .eq("phone", phone)
     .maybeSingle();
 
@@ -152,7 +157,7 @@ export async function getReportSessionState(phone: string): Promise<{
   }
 
   return {
-    hasPhoto: Boolean(session.photo_base64),
+    hasPhoto: Boolean(session.photo_mime_type),
     hasLocation: session.lat != null && session.lng != null,
     hasNote: Boolean(session.note),
     hasName: Boolean(session.reporter_name),
