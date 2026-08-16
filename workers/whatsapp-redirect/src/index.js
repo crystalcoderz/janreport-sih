@@ -1,13 +1,16 @@
-// janreport.xyz exists only to hand a citizen straight to the WhatsApp bot,
-// so every path and query on the apex redirects to the same chat link. The
-// prefilled "Hi" matters: it matches GREETING_RE in the reporting webhook,
-// which is what triggers the welcome poster, voice notes and quick-report
-// buttons instead of a cold empty chat.
-const TARGET = "https://wa.me/31653826705?text=Hi";
+// janreport.xyz is the public, shareable name; the app itself is served from
+// janreport.prayaas.us. Path and query are preserved so a deep link posted
+// anywhere (a specific report, the map) survives the hop.
+const TARGET_ORIGIN = "https://janreport.prayaas.us";
 
 const worker = {
-  fetch() {
-    return Response.redirect(TARGET, 301);
+  fetch(request) {
+    const incoming = new URL(request.url);
+    const target = new URL(incoming.pathname + incoming.search, TARGET_ORIGIN);
+    // 302, not 301: browsers cache permanent redirects aggressively and this
+    // target is the kind of thing that moves. A wrong 301 is very hard to
+    // take back from someone who has already visited.
+    return Response.redirect(target.toString(), 302);
   },
 };
 
