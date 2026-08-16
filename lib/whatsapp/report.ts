@@ -132,6 +132,31 @@ export async function saveReporterNameToSession(phone: string, name: string): Pr
 // still overwrites it normally).
 const SESSION_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
 
+// Deletes an abandoned session before anything in this turn can write to it.
+//
+// getReportSessionState treats a session older than SESSION_STALE_AFTER_MS as
+// empty, but that check ran *after* the message had already been handled, and
+// every write bumps updated_at. So a citizen who sent a photo at 09:00,
+// wandered off, and dropped a location pin at 14:00 un-staled the row with
+// that pin and the report filed instantly — their five-hour-old photo, no
+// confirmation, "Report filed!". finalizeReportIfReady has no freshness check
+// of its own either, so the agent's file_new_report could reach the same
+// abandoned photo. Clearing up front closes both doors at once.
+export async function clearReportSessionIfStale(phone: string): Promise<void> {
+  const supabase = createServiceRoleClient();
+  const { data: session } = await supabase
+    .from("whatsapp_report_sessions")
+    .select("updated_at")
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (!session) return;
+  if (Date.now() - new Date(session.updated_at).getTime() <= SESSION_STALE_AFTER_MS) return;
+
+  console.log(`[whatsapp session] discarding stale session for ${phone}`);
+  await supabase.from("whatsapp_report_sessions").delete().eq("phone", phone);
+}
+
 export async function getReportSessionState(phone: string): Promise<{
   hasPhoto: boolean;
   hasLocation: boolean;

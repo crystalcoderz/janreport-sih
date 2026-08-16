@@ -48,8 +48,19 @@ export async function PATCH(
         { status: 400 }
       );
     }
-    // A crew with no department is a general-purpose unit and may go anywhere.
-    if (team.department_id && team.department_id !== target?.department_id) {
+    // Must match the trg_enforce_assigned_team_department trigger exactly,
+    // which requires `department_id = new.department_id`. A crew with no
+    // department can never satisfy that — NULL is not equal to anything — so
+    // treating it as a general-purpose unit here just moved the rejection
+    // into Postgres, where it surfaces to the officer as a failed save with
+    // no explanation.
+    if (!team.department_id) {
+      return NextResponse.json(
+        { error: "That crew has no department, so it can't be dispatched." },
+        { status: 400 }
+      );
+    }
+    if (team.department_id !== target?.department_id) {
       return NextResponse.json(
         { error: "That crew belongs to a different department." },
         { status: 400 }

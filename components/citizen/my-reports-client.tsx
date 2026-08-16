@@ -41,7 +41,9 @@ export function MyReportsClient({
   isStaff: boolean;
 }) {
   const [issues, setIssues] = useState<Issue[]>(initialIssues);
-  const [historyRows, setHistoryRows] = useState<HistoryRow[]>(history);
+  // Read-only now: the timeline is seeded from the server and the only live
+  // channel is the issues row itself, so nothing appends to this any more.
+  const [historyRows] = useState<HistoryRow[]>(history);
   const { permission, request, notify } = useNotificationPermission();
   const { t } = useTranslation();
 
@@ -62,32 +64,26 @@ export function MyReportsClient({
         (payload) => {
           const updated = payload.new as Issue;
           setIssues((prev) =>
-            prev.map((issue) =>
-              issue.id === updated.id ? { ...issue, ...updated } : issue
-            )
-          );
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "issue_status_history" },
-        (payload) => {
-          const row = payload.new as HistoryRow;
-          setIssues((prevIssues) => {
-            const match = prevIssues.find((i) => i.id === row.issue_id);
-            if (match) {
-              const statusLabel = row.status.replace("_", " ");
-              toast.info(`"${match.title}" is now ${statusLabel}`);
-              if (document.visibilityState === "hidden") {
-                notify(`JanReport: ${match.title}`, {
-                  body: `Status updated to ${statusLabel}`,
-                  icon: "/icon.svg",
-                });
+            prev.map((issue) => {
+              if (issue.id !== updated.id) return issue;
+              // The toast lives here, on the issues row, because that is the
+              // table actually in the realtime publication. It used to hang
+              // off an issue_status_history INSERT binding, and that table was
+              // never published — so the toast and the browser notification
+              // had simply never fired for anyone.
+              if (issue.status !== updated.status) {
+                const statusLabel = updated.status.replace("_", " ");
+                toast.info(`"${updated.title}" is now ${statusLabel}`);
+                if (document.visibilityState === "hidden") {
+                  notify(`JanReport: ${updated.title}`, {
+                    body: `Status updated to ${statusLabel}`,
+                    icon: "/icon.svg",
+                  });
+                }
               }
-            }
-            return prevIssues;
-          });
-          setHistoryRows((prev) => [...prev, row]);
+              return { ...issue, ...updated };
+            })
+          );
         }
       )
       .subscribe();

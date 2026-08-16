@@ -17,6 +17,7 @@ import {
   saveNoteToSession,
   saveReporterNameToSession,
   getReportSessionState,
+  clearReportSessionIfStale,
   finalizeReportIfReady,
   clearReportSession,
 } from "@/lib/whatsapp/report";
@@ -470,6 +471,10 @@ async function sendQuickButtons(phone: string) {
 async function handleMessage(message: WhatsAppMessage) {
   const phone = normalizePhone(message.from);
   if (!phone) return;
+
+  // Before anything writes to the session: an abandoned one must not be
+  // resurrected by this message bumping its updated_at.
+  await clearReportSessionIfStale(phone);
 
   // Fire-and-forget: gets the read receipt + "typing…" bubble up before any
   // of the slow work (media download, Gemini, the agent) starts, so the

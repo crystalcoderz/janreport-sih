@@ -12,17 +12,42 @@ export default async function AnalyticsPage() {
 
   const supabase = await createClient();
 
-  const [{ data: issues }, { data: departments }, { data: resolvedHistory }] =
-    await Promise.all([
-      supabase.from("issues").select("*"),
-      supabase.from("departments").select("*"),
-      supabase
-        .from("issue_status_history")
-        .select("issue_id, changed_at")
-        .eq("status", "resolved"),
-    ]);
+  const [issuesRes, departmentsRes, resolvedHistoryRes] = await Promise.all([
+    supabase.from("issues").select("*"),
+    supabase.from("departments").select("*"),
+    supabase
+      .from("issue_status_history")
+      .select("issue_id, changed_at")
+      .eq("status", "resolved"),
+  ]);
 
-  const stats = computeCityStats(issues ?? [], departments ?? [], resolvedHistory ?? []);
+  // `?? []` on a failed query is indistinguishable from a genuinely empty
+  // city: the page would render "0 reports, 0% resolution rate" with total
+  // confidence and an admin would read it as fact. Say so instead.
+  const loadError = issuesRes.error ?? departmentsRes.error ?? resolvedHistoryRes.error;
+  if (loadError) {
+    console.error("Analytics query failed", loadError);
+    return (
+      <div className="flex flex-col gap-4">
+        <h1 className="text-2xl font-bold">City Analytics</h1>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="font-medium">Could not load analytics.</p>
+            <p className="text-sm text-muted-foreground">
+              The figures are unavailable right now rather than zero — please
+              retry shortly.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const stats = computeCityStats(
+    issuesRes.data ?? [],
+    departmentsRes.data ?? [],
+    resolvedHistoryRes.data ?? []
+  );
   const maxCategoryCount = Math.max(1, ...stats.perCategory.map(([, c]) => c));
   const maxDeptCount = Math.max(1, ...stats.perDepartment.map((d) => d.total));
 

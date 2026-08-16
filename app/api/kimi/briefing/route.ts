@@ -18,17 +18,32 @@ export async function POST() {
   }
 
   const supabase = await createClient();
-  const [{ data: issues }, { data: departments }, { data: resolvedHistory }] =
-    await Promise.all([
-      supabase.from("issues").select("*"),
-      supabase.from("departments").select("*"),
-      supabase
-        .from("issue_status_history")
-        .select("issue_id, changed_at")
-        .eq("status", "resolved"),
-    ]);
+  const [issuesRes, departmentsRes, resolvedHistoryRes] = await Promise.all([
+    supabase.from("issues").select("*"),
+    supabase.from("departments").select("*"),
+    supabase
+      .from("issue_status_history")
+      .select("issue_id, changed_at")
+      .eq("status", "resolved"),
+  ]);
 
-  const stats = computeCityStats(issues ?? [], departments ?? [], resolvedHistory ?? []);
+  // Worse here than on the page: a failed query would hand the model an
+  // all-zero city and it would write a fluent, confident briefing about a
+  // town with no problems, which an admin has no way to tell from a real one.
+  const loadError = issuesRes.error ?? departmentsRes.error ?? resolvedHistoryRes.error;
+  if (loadError) {
+    console.error("Briefing stats query failed", loadError);
+    return NextResponse.json(
+      { error: "Could not read city statistics. Please try again shortly." },
+      { status: 503 }
+    );
+  }
+
+  const stats = computeCityStats(
+    issuesRes.data ?? [],
+    departmentsRes.data ?? [],
+    resolvedHistoryRes.data ?? []
+  );
 
   try {
     const briefing = await kimiChat(

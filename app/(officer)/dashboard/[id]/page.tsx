@@ -49,8 +49,9 @@ export default async function IssueDetailPage({
 
   if (!issue) notFound();
 
-  // Crews for this issue's department (plus any unassigned-to-a-department
-  // crews, which can be dispatched anywhere).
+  // Crews for this issue's department only. A crew with no department is not
+  // "dispatchable anywhere" — the database trigger rejects it outright — so
+  // offering one here only produces a failed save.
   const { data: teams } = await supabase
     .from("teams")
     .select("id, name, contact_phone, department_id")
@@ -58,7 +59,7 @@ export default async function IssueDetailPage({
     .order("name");
 
   const eligibleTeams = (teams ?? []).filter(
-    (t) => !t.department_id || t.department_id === issue.department_id
+    (t) => t.department_id && t.department_id === issue.department_id
   );
 
   const assignedTeam = (
