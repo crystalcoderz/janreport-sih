@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { LandingContent, type LandingStats } from "@/components/landing/landing-content";
@@ -28,13 +29,22 @@ async function getLandingStats(): Promise<LandingStats> {
   }
 }
 
+// WhatsApp is the product; the landing page was a detour on the way to it.
+// A visitor who isn't signed in goes straight to the bot, prefilled with the
+// greeting that triggers the welcome (poster, voice notes, quick-report
+// buttons) rather than an empty chat. Anyone already signed in — officers,
+// admins, a citizen mid-session — still gets the web app, so the dashboard
+// stays reachable. /login, /map and /dashboard remain directly addressable
+// either way.
+const WHATSAPP_CHAT_URL = "https://wa.me/31653826705?text=Hi";
+
 export default async function Home() {
   const [profile, stats] = await Promise.all([getCurrentProfile(), getLandingStats()]);
-  const primaryHref = profile
-    ? profile.role === "officer" || profile.role === "admin"
-      ? "/dashboard"
-      : "/report"
-    : "/login";
+
+  if (!profile) redirect(WHATSAPP_CHAT_URL);
+
+  const primaryHref =
+    profile.role === "officer" || profile.role === "admin" ? "/dashboard" : "/report";
 
   return (
     <LandingContent

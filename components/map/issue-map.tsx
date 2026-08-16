@@ -1,23 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { APIProvider, Map, AdvancedMarker, InfoWindow, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, Map, AdvancedMarker, InfoWindow } from "@vis.gl/react-google-maps";
 import "leaflet/dist/leaflet.css";
-import {
-  MapContainer,
-  TileLayer,
-  CircleMarker,
-  Popup,
-  useMap as useLeafletMapInstance,
-} from "react-leaflet";
-import L from "leaflet";
-import "leaflet.heat";
+import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import { severityColor } from "@/lib/departments";
 import type { Database } from "@/lib/supabase/types";
 
 type Issue = Database["public"]["Tables"]["issues"]["Row"];
 
-const DEFAULT_CENTER: [number, number] = [28.31, 77.52]; // Greater Noida — where the demo/seed data lives
+// Knowledge Park, Greater Noida — beside GLA/GL Bajaj, which is where the
+// demo is given and where the seeded and WhatsApp-filed reports cluster.
+const DEFAULT_CENTER: [number, number] = [28.4778, 77.4921];
 
 // A real Map ID (Google Cloud Console -> Maps -> Map IDs) unlocks custom
 // cloud-based styling; this placeholder id works out of the box for
@@ -29,7 +23,6 @@ interface MapProps {
   center?: [number, number];
   zoom?: number;
   height?: string;
-  heatmap?: boolean;
   renderPopup?: (issue: Issue) => React.ReactNode;
 }
 
@@ -112,7 +105,7 @@ function checkGoogleMapsAvailable(apiKey: string): Promise<boolean> {
           "position:fixed;top:0;left:0;width:120px;height:120px;opacity:0;pointer-events:none;z-index:-1;";
         document.body.appendChild(div);
         const map = new google.maps.Map(div, {
-          center: { lat: 23.3441, lng: 85.3096 },
+          center: { lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1] },
           zoom: 13,
           mapId: "DEMO_MAP_ID",
           disableDefaultUI: true,
@@ -203,7 +196,6 @@ function GoogleIssueMap({
   center,
   zoom = 13,
   height = "420px",
-  heatmap = false,
   renderPopup,
   apiKey,
 }: MapProps & { apiKey: string }) {
@@ -220,9 +212,7 @@ function GoogleIssueMap({
         disableDefaultUI={false}
         clickableIcons={false}
       >
-        {heatmap && <GoogleHeatmapLayer issues={issues} />}
-        {!heatmap &&
-          issues.map((issue) => (
+        {          issues.map((issue) => (
             <AdvancedMarker
               key={issue.id}
               position={{ lat: issue.lat, lng: issue.lng }}
@@ -240,7 +230,7 @@ function GoogleIssueMap({
               />
             </AdvancedMarker>
           ))}
-        {selected && !heatmap && (
+        {selected && (
           <InfoWindow
             position={{ lat: selected.lat, lng: selected.lng }}
             onCloseClick={() => setSelected(null)}
@@ -253,49 +243,12 @@ function GoogleIssueMap({
   );
 }
 
-// @types/google.maps ships an incomplete HeatmapLayer stub (no constructor
-// options, no setMap) even though the runtime API has always had both —
-// this describes just the surface actually used here.
-interface RuntimeHeatmapLayer {
-  setMap(map: google.maps.Map | null): void;
-}
-interface HeatmapLayerConstructor {
-  new (opts: {
-    data: { location: google.maps.LatLng; weight: number }[];
-    radius: number;
-  }): RuntimeHeatmapLayer;
-}
-
-function GoogleHeatmapLayer({ issues }: { issues: Issue[] }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!map || issues.length === 0) return;
-    const HeatmapLayer = google.maps.visualization
-      ?.HeatmapLayer as unknown as HeatmapLayerConstructor | undefined;
-    if (!HeatmapLayer) return;
-
-    const layer = new HeatmapLayer({
-      data: issues.map((i) => ({
-        location: new google.maps.LatLng(i.lat, i.lng),
-        weight: Math.max(0.3, i.ai_severity / 10),
-      })),
-      radius: 28,
-    });
-    layer.setMap(map);
-    return () => layer.setMap(null);
-  }, [map, issues]);
-
-  return null;
-}
-
 // Fallback map — no API key or Google account setup required.
 function LeafletIssueMap({
   issues,
   center,
   zoom = 13,
   height = "420px",
-  heatmap = false,
   renderPopup,
 }: MapProps) {
   return (
@@ -309,9 +262,7 @@ function LeafletIssueMap({
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      {heatmap && <LeafletHeatmapLayer issues={issues} />}
-      {!heatmap &&
-        issues.map((issue) => (
+      {        issues.map((issue) => (
           <CircleMarker
             key={issue.id}
             center={[issue.lat, issue.lng]}
@@ -330,22 +281,3 @@ function LeafletIssueMap({
   );
 }
 
-function LeafletHeatmapLayer({ issues }: { issues: Issue[] }) {
-  const map = useLeafletMapInstance();
-
-  useEffect(() => {
-    if (issues.length === 0) return;
-    const points: Array<[number, number, number]> = issues.map((i) => [
-      i.lat,
-      i.lng,
-      Math.max(0.3, i.ai_severity / 10),
-    ]);
-    const layer = L.heatLayer(points, { radius: 28, blur: 22, maxZoom: 17 });
-    layer.addTo(map);
-    return () => {
-      map.removeLayer(layer);
-    };
-  }, [issues, map]);
-
-  return null;
-}
