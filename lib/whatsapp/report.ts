@@ -192,6 +192,10 @@ export type FinalizeReportResult =
         reporterName: string;
       };
     }
+  // The photo does not show a civic issue at all. Kept distinct from
+  // "error" so the caller can ask for a better photo instead of apologising
+  // for a failure that did not happen.
+  | { status: "not_an_issue"; description: string }
   | { status: "error"; message: string };
 
 // Classifies + files the report sitting in this phone's session (mirroring
@@ -243,6 +247,16 @@ export async function finalizeReportIfReady(
   } catch (err) {
     console.error("WhatsApp classification failed", err);
     return { status: "error", message: "Could not process that photo. Please try sending it again." };
+  }
+
+  // Citizens send selfies, pets and photos of their own floor by mistake, and
+  // every one of those was being filed as a report with a department attached
+  // — the map filled up with "Personal photo, not a civic issue". Stop before
+  // the report exists rather than asking an officer to clear it up later. The
+  // session is deliberately left intact: their location and name are still
+  // good, so a replacement photo is all that is needed.
+  if (!classification.isCivicIssue) {
+    return { status: "not_an_issue", description: classification.description };
   }
 
   if (!options?.forceNew) {

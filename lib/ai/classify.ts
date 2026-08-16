@@ -4,6 +4,12 @@ import { ISSUE_CATEGORIES, type IssueCategory } from "@/lib/departments";
 import { withAiRetry } from "@/lib/ai/retry";
 
 export interface ClassificationResult {
+  // False when the photo shows no civic issue at all — a selfie, an indoor
+  // floor, a blurry wall. Asked of the model directly rather than inferred
+  // from category/severity, because those do not separate it: real junk comes
+  // back as `other` at confidence 0.95-1.00, and `other` is also a legitimate
+  // category for a genuine issue that fits nothing else.
+  isCivicIssue: boolean;
   category: IssueCategory;
   severity: number; // 1-10
   severityLabel: string;
@@ -15,6 +21,11 @@ export interface ClassificationResult {
 const RESPONSE_SCHEMA = {
   type: Type.OBJECT,
   properties: {
+    isCivicIssue: {
+      type: Type.BOOLEAN,
+      description:
+        "True only if the photo actually shows a civic/municipal problem in a public place. False for selfies, people, pets, food, screenshots, indoor rooms, plain floors or walls, blurry or unidentifiable images, and anything with no visible problem.",
+    },
     category: {
       type: Type.STRING,
       format: "enum",
@@ -44,7 +55,7 @@ const RESPONSE_SCHEMA = {
         "A 1-2 sentence objective description of what is visible in the photo, for the municipal officer.",
     },
   },
-  required: ["category", "severity", "confidence", "title", "description"],
+  required: ["isCivicIssue", "category", "severity", "confidence", "title", "description"],
 };
 
 function severityLabel(score: number): string {
@@ -82,7 +93,7 @@ async function classifyOnce(params: {
         },
       },
       {
-        text: `You are triaging a citizen-submitted civic issue report for a municipal government system (JanReport). Classify the photo above into exactly one category, and score its severity/urgency for municipal response.${
+        text: `You are triaging a citizen-submitted civic issue report for a municipal government system (JanReport). First decide whether the photo shows a real civic issue at all — citizens frequently send selfies, pets, food, screenshots or photos of an indoor floor by mistake. If it does not show a municipal problem in a public place, set isCivicIssue to false. Then classify the photo into exactly one category, and score its severity/urgency for municipal response.${
           params.note ? `\n\nCitizen's note: "${params.note}"` : ""
         }\n\nRespond with the classification as JSON matching the provided schema.`,
       },
@@ -99,6 +110,7 @@ async function classifyOnce(params: {
   }
 
   const input = JSON.parse(text) as {
+    isCivicIssue: boolean;
     category: IssueCategory;
     severity: number;
     confidence: number;
@@ -109,6 +121,7 @@ async function classifyOnce(params: {
   const severity = Math.min(10, Math.max(1, Math.round(input.severity)));
 
   return {
+    isCivicIssue: input.isCivicIssue !== false,
     category: input.category,
     severity,
     severityLabel: severityLabel(severity),

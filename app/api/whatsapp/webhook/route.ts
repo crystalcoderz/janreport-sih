@@ -205,6 +205,19 @@ async function fileCompletedReport(phone: string): Promise<boolean> {
     return true;
   }
 
+  if (result.status === "not_an_issue") {
+    await sendWhatsAppText(
+      phone,
+      `⚠️ I couldn't spot a civic issue in that photo.
+` +
+        `I saw: ${result.description}
+
+` +
+        `Send another photo showing the problem itself — the pothole, the rubbish, the broken pole — and I'll file it. Your location and name are still saved.`
+    );
+    return true;
+  }
+
   if (result.status === "duplicates") {
     const closest = result.duplicates[0];
     if (closest.photoUrl) {
