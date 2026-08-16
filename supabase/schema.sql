@@ -793,9 +793,15 @@ grant update (
   acknowledgement_sent_at
 ) on issues to authenticated;
 
--- issues_insert_own (citizens filing a report) still needs its full column
--- set — the revoke above only narrowed UPDATE, not INSERT.
-grant insert on issues to authenticated;
+-- Citizens no longer insert directly. /api/issues writes with the service
+-- role, so the only way to create an issue is through that route — which
+-- classifies the photo, rejects images showing no civic issue, runs the
+-- duplicate scan and applies a per-user rate limit. Granting INSERT here let
+-- a citizen POST to PostgREST with their own token and skip all four.
+-- guard_issue_workflow_fields_on_insert above already stopped them forging a
+-- resolved or 9999-upvote issue; this closes the remaining gap, which was
+-- creating arbitrary ones.
+revoke insert on issues from authenticated;
 
 -- issue_upvotes: any signed-in user can upvote/un-upvote, only as themselves.
 create policy "issue_upvotes_select_authenticated" on issue_upvotes

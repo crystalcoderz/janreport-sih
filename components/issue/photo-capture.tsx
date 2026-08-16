@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Camera, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/lib/i18n/context";
+import { downscaleImage } from "@/lib/image-resize";
 
 export function PhotoCapture({
   onChange,
@@ -15,10 +16,17 @@ export function PhotoCapture({
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
-  function handleFile(file: File | null) {
+  async function handleFile(file: File | null) {
     if (preview) URL.revokeObjectURL(preview);
-    setPreview(file ? URL.createObjectURL(file) : null);
-    onChange(file);
+    if (!file) {
+      setPreview(null);
+      onChange(null);
+      return;
+    }
+    // Preview immediately from the original so the UI never waits on the
+    // canvas work, then hand the caller the downscaled copy.
+    setPreview(URL.createObjectURL(file));
+    onChange(await downscaleImage(file));
   }
 
   if (preview) {
@@ -38,7 +46,7 @@ export function PhotoCapture({
           size="icon"
           className="absolute right-2 top-2"
           onClick={() => {
-            handleFile(null);
+            void handleFile(null);
             if (inputRef.current) inputRef.current.value = "";
           }}
         >
@@ -62,7 +70,7 @@ export function PhotoCapture({
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+        onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
       />
     </button>
   );

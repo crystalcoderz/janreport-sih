@@ -82,6 +82,10 @@ export const en = {
   "report.addPhotoFirst": "Add a photo of the issue first.",
   "report.shareLocationFirst": "Share your location first.",
   "report.reportedSuccess": "Issue reported — thank you!",
+  "report.networkError": "Network error. Please try again.",
+  "report.upvotedExisting": "Upvoted the existing report — thanks for confirming it!",
+  "report.upvoteFailed": "Could not upvote. Please try again.",
+  "report.duplicateBody": "We found similar reports nearby. Upvoting boosts an existing report's priority instead of creating a duplicate ticket.",
 
   "myReports.title": "My Reports",
   "myReports.description": "Track the status of issues you've reported.",
@@ -185,6 +189,10 @@ export const hi: Partial<Record<TranslationKey, string>> = {
   "report.addPhotoFirst": "पहले समस्या की एक फोटो जोड़ें।",
   "report.shareLocationFirst": "पहले अपना स्थान साझा करें।",
   "report.reportedSuccess": "समस्या दर्ज हो गई — धन्यवाद!",
+  "report.networkError": "नेटवर्क त्रुटि। कृपया पुनः प्रयास करें।",
+  "report.upvotedExisting": "मौजूदा रिपोर्ट को अपवोट किया — पुष्टि करने के लिए धन्यवाद!",
+  "report.upvoteFailed": "अपवोट नहीं हो सका। कृपया पुनः प्रयास करें।",
+  "report.duplicateBody": "पास में मिलती-जुलती रिपोर्ट मिलीं। नई डुप्लिकेट बनाने के बजाय अपवोट करने से मौजूदा रिपोर्ट की प्राथमिकता बढ़ती है।",
 
   "myReports.title": "मेरी रिपोर्ट्स",
   "myReports.description": "आपकी दर्ज समस्याओं की स्थिति यहां ट्रैक करें।",

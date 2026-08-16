@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { classifyIssuePhoto } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
@@ -172,7 +172,21 @@ export async function POST(request: NextRequest) {
       .maybeSingle(),
   ]);
 
-  const { data: issue, error: insertError } = await supabase
+  // Written with the service role so that `insert on issues` can be revoked
+  // from `authenticated` — otherwise a citizen can POST straight to PostgREST
+  // with their own session token and skip everything this route does: the
+  // classification, the is-it-actually-a-civic-issue check, the duplicate
+  // scan and the rate limit. The workflow-field trigger already stops them
+  // forging a resolved, 9999-upvote issue, but nothing stopped them creating
+  // arbitrary ones.
+  //
+  // Safe to bypass RLS here because every column below is server-derived:
+  // reporter_id comes from the verified session, the rest from the
+  // classifier. Nothing from the request body is spread in. The points
+  // trigger keys off new.reporter_id rather than auth.uid(), so it still
+  // fires correctly.
+  const admin = createServiceRoleClient();
+  const { data: issue, error: insertError } = await admin
     .from("issues")
     .insert({
       reporter_id: user.id,
