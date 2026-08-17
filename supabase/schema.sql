@@ -803,6 +803,34 @@ grant update (
 -- creating arbitrary ones.
 revoke insert on issues from authenticated;
 
+-- Supabase's default `grant all on all tables in schema public to anon,
+-- authenticated` leaves TRUNCATE on every table. RLS cannot restrain TRUNCATE
+-- at all — it is not a row operation — so unlike the dead INSERT/UPDATE/DELETE
+-- grants (which the absence of a matching policy already denies), this one is
+-- ungoverned. Nothing in this app truncates anything.
+do $$
+declare t text;
+begin
+  for t in
+    select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'r'
+      and pg_get_userbyid(c.relowner) = current_user
+  loop
+    execute format('revoke truncate on public.%I from anon, authenticated', t);
+  end loop;
+end $$;
+
+-- NOT fixable from here, recorded so it is not rediscovered as new:
+-- spatial_ref_sys, geometry_columns and geography_columns are owned by
+-- supabase_admin, have RLS disabled, and carry write grants for anon. Since
+-- grants can only be revoked by the grantor and supabase_admin is not
+-- reachable from the postgres role, an anonymous caller can insert into or
+-- delete from PostGIS's coordinate-system reference table through PostgREST.
+-- Verified live: deleting srid 4326 succeeds and has to be restored by hand.
+-- The app's own queries are unaffected (geography columns carry their SRID
+-- inline and st_dwithin does not consult this table), so the practical impact
+-- is limited, but it needs Supabase support to close properly.
+
 -- issue_upvotes: any signed-in user can upvote/un-upvote, only as themselves.
 create policy "issue_upvotes_select_authenticated" on issue_upvotes
   for select to authenticated using (true);
