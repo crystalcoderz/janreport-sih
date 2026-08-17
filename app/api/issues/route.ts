@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
-import { classifyIssuePhoto } from "@/lib/ai/classify";
+import { classifyIssuePhoto, rejectionFor } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 import {
@@ -114,15 +114,9 @@ export async function POST(request: NextRequest) {
   // Same guard as the WhatsApp path: do not create a report for a photo that
   // shows no civic issue. 422 rather than 400 — the request was well formed,
   // the content just is not reportable.
-  if (!classification.isCivicIssue) {
-    return NextResponse.json(
-      {
-        error:
-          "That photo doesn't appear to show a civic issue. Please photograph the problem itself and try again.",
-        classification,
-      },
-      { status: 422 }
-    );
+  const rejection = rejectionFor(classification);
+  if (rejection) {
+    return NextResponse.json({ error: rejection, classification }, { status: 422 });
   }
 
   if (!forceNew) {

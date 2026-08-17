@@ -1,5 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { classifyIssuePhoto } from "@/lib/ai/classify";
+import { classifyIssuePhoto, rejectionFor } from "@/lib/ai/classify";
 import {
   comparePhotosForDuplicate,
   isConfirmedDuplicate,
@@ -280,8 +280,10 @@ export async function finalizeReportIfReady(
   // the report exists rather than asking an officer to clear it up later. The
   // session is deliberately left intact: their location and name are still
   // good, so a replacement photo is all that is needed.
-  if (!classification.isCivicIssue) {
-    return { status: "not_an_issue", description: classification.description };
+  const rejection = rejectionFor(classification);
+  if (rejection) {
+    console.log(`[whatsapp screen] rejected: ${rejection}`);
+    return { status: "not_an_issue", description: rejection };
   }
 
   if (!options?.forceNew) {
