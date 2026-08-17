@@ -86,7 +86,19 @@ export async function saveAddressToSession(
   | { ok: false; error: string }
 > {
   const geocoded = await forwardGeocode(address);
-  if (!geocoded) {
+  // A null result is NOT the only failure. The search is country-biased to
+  // India, so an unrecognisable query does not fail — it collapses to the
+  // country centroid, and "Zxqwvbrn Nonexistentpur Qqzz" came back as a
+  // perfectly valid-looking hit at 20.5937, 78.9629 with the address "India".
+  // A report was then filed 887 km from the citizen, reverse-geocoded to a
+  // random village in Maharashtra. geo.ts exposes `specificity` precisely for
+  // this, and pending-input.ts already checks it; this path did not.
+  //
+  // Only `coarse` (country-level) is refused. `locality` — "Greater Noida" —
+  // is a legitimate answer from someone reporting an issue they are not
+  // standing at, and the agent reads the resolved address back so a wrong pin
+  // can still be caught.
+  if (!geocoded || geocoded.specificity === "coarse") {
     return {
       ok: false,
       error: "Could not find that location. Try adding more detail — area, landmark, or city.",
