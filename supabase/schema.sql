@@ -70,6 +70,19 @@ create table profiles (
   created_at timestamptz not null default now()
 );
 
+-- Field crews a department dispatches to an issue. Routing picks the
+-- department; this is the next step down — which crew owns the job.
+create table teams (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  department_id uuid references departments (id) on delete set null,
+  contact_phone text,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index teams_department_id_idx on teams (department_id);
+
 create table issues (
   id uuid primary key default gen_random_uuid(),
   reporter_id uuid not null references profiles (id),
@@ -100,9 +113,18 @@ create table issues (
     check (resolution_verdict_confidence is null
            or resolution_verdict_confidence between 0 and 1),
   resolution_verified_at timestamptz,
+  assigned_team_id uuid references teams (id) on delete set null,
+  assigned_at timestamptz,
+  -- Captured fresh per report on WhatsApp (not read from profiles.full_name,
+  -- which is usually null there and may not be the person at the issue) —
+  -- used to personalize the officer-facing acknowledgement letter.
+  reporter_name text,
+  acknowledgement_sent_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index issues_assigned_team_id_idx on issues (assigned_team_id);
 
 create table issue_upvotes (
   issue_id uuid not null references issues (id) on delete cascade,
@@ -186,7 +208,12 @@ create table whatsapp_otp_codes (
   expires_at timestamptz not null,
   attempts smallint not null default 0,
   consumed_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Public, unauthenticated endpoint: the per-phone cooldown alone doesn't
+  -- stop one caller fanning out across many different numbers, and each
+  -- send is a real billed WhatsApp message to a third party. This backs a
+  -- per-IP rate limit in lib/whatsapp/otp.ts.
+  ip text
 );
 
 -- Scratch space for an in-progress "report an issue" conversation over
@@ -201,8 +228,20 @@ create table whatsapp_report_sessions (
   lat double precision,
   lng double precision,
   note text,
+  reporter_name text,
   updated_at timestamptz not null default now()
 );
+
+-- Meta retries a webhook delivery if it isn't acknowledged fast enough.
+-- Claiming the message id here makes handling idempotent, so a retry
+-- can't produce a second reply to the same citizen message.
+create table whatsapp_processed_messages (
+  message_id text primary key,
+  processed_at timestamptz not null default now()
+);
+
+create index whatsapp_processed_messages_processed_at_idx
+  on whatsapp_processed_messages (processed_at);
 
 -- ---------------------------------------------------------------------
 -- Web Push
@@ -249,6 +288,8 @@ create index volunteer_groups_created_by_idx
   on volunteer_groups (created_by);
 create index whatsapp_otp_codes_phone_idx
   on whatsapp_otp_codes (phone, created_at desc);
+create index whatsapp_otp_codes_ip_created_at_idx
+  on whatsapp_otp_codes (ip, created_at);
 create index push_subscriptions_user_id_idx
   on push_subscriptions (user_id);
 
@@ -315,10 +356,51 @@ create trigger issues_set_updated_at
   before update on issues
   for each row execute function touch_issues_updated_at();
 
+-- RLS on issues only checks row-level access (officer's department matches
+-- the issue's department) — it can't cross-check that assigned_team_id
+-- actually belongs to that department. The app's assign API validates
+-- this, but an officer can bypass that route entirely via a direct
+-- PostgREST call with their own session token, since RLS alone permits it
+-- (confirmed live: a Roads officer successfully assigned a Sanitation team
+-- to a Roads issue this way). Enforce it in the database so it holds
+-- regardless of which door someone comes through.
+create or replace function enforce_assigned_team_department()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.assigned_team_id is not null then
+    if not exists (
+      select 1 from teams
+      where id = new.assigned_team_id
+        and department_id = new.department_id
+        and active = true
+    ) then
+      raise exception 'assigned_team_id must reference an active team in the issue''s own department';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_assigned_team_department on issues;
+create trigger trg_enforce_assigned_team_department
+  before insert or update of assigned_team_id, department_id on issues
+  for each row
+  execute function enforce_assigned_team_department();
+
 -- Keep issues.upvote_count in sync with issue_upvotes rows.
+-- SECURITY DEFINER because upvote_count is deliberately excluded from the
+-- authenticated role's column-level UPDATE grant below (so a citizen can't
+-- PATCH a vote count straight through PostgREST). Without it this trigger
+-- runs as the voting citizen and its own UPDATE is denied, which broke
+-- upvoting entirely with "permission denied for table issues".
 create function apply_upvote_delta()
 returns trigger
 language plpgsql
+security definer
 set search_path = public
 as $$
 begin
@@ -354,6 +436,55 @@ $$;
 create trigger issues_award_points_on_report
   after insert on issues
   for each row execute function award_points_on_issue_report();
+
+-- issues_insert_own only checks reporter_id = auth.uid() — nothing stops
+-- a citizen inserting directly via REST with status:'resolved',
+-- upvote_count:9999, a self-assigned crew, or a fabricated resolution
+-- verdict, none of which any real insert path ever sets (both the web
+-- route and the WhatsApp flow only ever set reporter/title/description/
+-- classification/photo/location/department at creation). Confirmed live:
+-- a citizen POSTed a "resolved" issue with upvote_count 9999 and got 201.
+--
+-- Deliberately narrower than blocking the whole insert: ai_category,
+-- ai_severity, department_id etc. are legitimately set by the citizen's
+-- own session client in the real flow (server-computed, but written under
+-- their RLS context, not service role), so those stay as-is — this only
+-- forces the workflow fields that are always attacker-controlled and
+-- never legitimately non-default at creation.
+--
+-- Scoped to auth.uid() is not null so service-role inserts (the WhatsApp
+-- flow, and any future admin/seed script) are untouched — service role
+-- has no JWT, so auth.uid() reads null there regardless of role checks.
+create function guard_issue_workflow_fields_on_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is not null and not exists (
+    select 1 from profiles p where p.id = auth.uid() and p.role = 'admin'
+  ) then
+    new.status := 'reported';
+    new.upvote_count := 0;
+    new.assigned_team_id := null;
+    new.assigned_at := null;
+    new.resolution_photo_url := null;
+    new.resolution_note := null;
+    new.resolution_verdict := null;
+    new.resolution_verdict_reason := null;
+    new.resolution_verdict_confidence := null;
+    new.resolution_verified_at := null;
+    new.acknowledgement_sent_at := null;
+    new.duplicate_of := null;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger issues_guard_workflow_fields
+  before insert on issues
+  for each row execute function guard_issue_workflow_fields_on_insert();
 
 create function award_points_on_issue_resolved()
 returns trigger
@@ -481,9 +612,14 @@ create trigger issue_volunteer_offers_set_updated_at
   before update on issue_volunteer_offers
   for each row execute function touch_updated_at();
 
--- Only an officer/admin may flip a volunteer group's `verified` flag —
+-- Only an officer/admin may set a volunteer group's `verified` flag —
 -- otherwise a group could self-certify as legitimate. Mirrors
--- prevent_profile_privilege_escalation's approach above.
+-- prevent_profile_privilege_escalation's approach above. Originally only
+-- ran on UPDATE, which guarded a citizen flipping an existing row but not
+-- inserting a brand-new one already marked verified — confirmed live: a
+-- plain citizen POSTed a group with verified:true and got 201, bypassing
+-- the "officers verify legitimate groups" step the UI promises. INSERT
+-- has no `old` row to fall back to, so that branch just forces false.
 create function prevent_volunteer_group_self_verify()
 returns trigger
 language plpgsql
@@ -491,6 +627,18 @@ security definer
 set search_path = public
 as $$
 begin
+  if tg_op = 'INSERT' then
+    if new.verified
+      and not exists (
+        select 1 from profiles p
+        where p.id = auth.uid() and p.role in ('officer', 'admin')
+      )
+    then
+      new.verified := false;
+    end if;
+    return new;
+  end if;
+
   if new.verified is distinct from old.verified
     and not exists (
       select 1 from profiles p
@@ -504,7 +652,7 @@ end;
 $$;
 
 create trigger volunteer_groups_guard_verified
-  before update on volunteer_groups
+  before insert or update on volunteer_groups
   for each row execute function prevent_volunteer_group_self_verify();
 
 -- These are all trigger-only functions (return type "trigger"), so
@@ -521,6 +669,9 @@ revoke execute on function award_points_on_issue_resolved() from public, anon, a
 revoke execute on function notify_nearby_residents() from public, anon, authenticated;
 revoke execute on function prevent_issue_notification_tamper() from public, anon, authenticated;
 revoke execute on function prevent_volunteer_group_self_verify() from public, anon, authenticated;
+revoke execute on function guard_issue_workflow_fields_on_insert() from public, anon, authenticated;
+revoke execute on function apply_upvote_delta() from public, anon, authenticated;
+revoke execute on function enforce_assigned_team_department() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- Row Level Security
@@ -540,6 +691,25 @@ alter table issue_volunteer_offers enable row level security;
 -- (anon/authenticated) access outright.
 alter table whatsapp_otp_codes enable row level security;
 alter table whatsapp_report_sessions enable row level security;
+alter table whatsapp_processed_messages enable row level security;
+alter table teams enable row level security;
+
+-- Any signed-in staff member needs to read the crew list to assign work;
+-- only admins curate it.
+-- Crew rosters carry direct contact numbers for municipal field staff and
+-- are only ever rendered on officer screens.
+create policy "teams_select_officer_admin" on teams
+  for select to authenticated using (
+    exists (
+      select 1 from profiles p
+      where p.id = auth.uid() and p.role in ('officer', 'admin')
+    )
+  );
+
+create policy "teams_admin_manage" on teams
+  for all to authenticated
+  using (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'admin'))
+  with check (exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'admin'));
 alter table push_subscriptions enable row level security;
 
 -- profiles: any signed-in user can read profiles (names/roles are not
@@ -550,6 +720,34 @@ create policy "profiles_select_authenticated" on profiles
 
 create policy "profiles_update_own" on profiles
   for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
+
+-- RLS is row-level only, so the policy above would still expose every
+-- resident's phone number and exact home coordinates to any signed-in
+-- user. Column grants are the missing half: cross-user reads are narrowed
+-- to the display fields the UI actually joins on (profiles(full_name)).
+revoke select on profiles from authenticated;
+grant select (id, full_name, role, department_id, points, created_at)
+  on profiles to authenticated;
+
+revoke update on profiles from authenticated;
+grant update (full_name, home_lat, home_lng, notify_radius_m)
+  on profiles to authenticated;
+
+-- Own profile still needs the full row (home location for geofenced
+-- alerts). SECURITY DEFINER to see the withheld columns, hard-scoped to
+-- auth.uid() so it can never return anyone else's.
+create or replace function get_my_profile()
+returns setof profiles
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select * from profiles where id = auth.uid();
+$$;
+
+revoke all on function get_my_profile() from public, anon;
+grant execute on function get_my_profile() to authenticated;
 
 -- departments: public read-only reference data.
 create policy "departments_select_all" on departments
@@ -575,6 +773,64 @@ create policy "issues_update_officer_admin" on issues
     )
   );
 
+-- RLS scopes which ROWS an officer/admin may touch, but has no opinion on
+-- which COLUMNS — without this, an officer could rewrite title, photo_url,
+-- reporter_id, the AI fields, or even department_id (letting them escape
+-- department scoping on their next update). The app's officer-facing
+-- routes (status update, crew assignment) only ever write this exact
+-- column set.
+revoke update on issues from authenticated;
+grant update (
+  status,
+  resolution_photo_url,
+  resolution_note,
+  resolution_verdict,
+  resolution_verdict_reason,
+  resolution_verdict_confidence,
+  resolution_verified_at,
+  assigned_team_id,
+  assigned_at,
+  acknowledgement_sent_at
+) on issues to authenticated;
+
+-- Citizens no longer insert directly. /api/issues writes with the service
+-- role, so the only way to create an issue is through that route — which
+-- classifies the photo, rejects images showing no civic issue, runs the
+-- duplicate scan and applies a per-user rate limit. Granting INSERT here let
+-- a citizen POST to PostgREST with their own token and skip all four.
+-- guard_issue_workflow_fields_on_insert above already stopped them forging a
+-- resolved or 9999-upvote issue; this closes the remaining gap, which was
+-- creating arbitrary ones.
+revoke insert on issues from authenticated;
+
+-- Supabase's default `grant all on all tables in schema public to anon,
+-- authenticated` leaves TRUNCATE on every table. RLS cannot restrain TRUNCATE
+-- at all — it is not a row operation — so unlike the dead INSERT/UPDATE/DELETE
+-- grants (which the absence of a matching policy already denies), this one is
+-- ungoverned. Nothing in this app truncates anything.
+do $$
+declare t text;
+begin
+  for t in
+    select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'r'
+      and pg_get_userbyid(c.relowner) = current_user
+  loop
+    execute format('revoke truncate on public.%I from anon, authenticated', t);
+  end loop;
+end $$;
+
+-- NOT fixable from here, recorded so it is not rediscovered as new:
+-- spatial_ref_sys, geometry_columns and geography_columns are owned by
+-- supabase_admin, have RLS disabled, and carry write grants for anon. Since
+-- grants can only be revoked by the grantor and supabase_admin is not
+-- reachable from the postgres role, an anonymous caller can insert into or
+-- delete from PostGIS's coordinate-system reference table through PostgREST.
+-- Verified live: deleting srid 4326 succeeds and has to be restored by hand.
+-- The app's own queries are unaffected (geography columns carry their SRID
+-- inline and st_dwithin does not consult this table), so the practical impact
+-- is limited, but it needs Supabase support to close properly.
+
 -- issue_upvotes: any signed-in user can upvote/un-upvote, only as themselves.
 create policy "issue_upvotes_select_authenticated" on issue_upvotes
   for select to authenticated using (true);
@@ -590,12 +846,19 @@ create policy "issue_upvotes_delete_own" on issue_upvotes
 create policy "issue_status_history_select_authenticated" on issue_status_history
   for select to authenticated using (true);
 
+-- Department-scoped, matching issues_update_officer_admin — checking only
+-- the actor's role would let any officer write timeline entries onto
+-- another department's issues.
 create policy "issue_status_history_insert_officer_admin" on issue_status_history
   for insert to authenticated with check (
     changed_by = auth.uid()
     and exists (
-      select 1 from profiles p
-      where p.id = auth.uid() and p.role in ('officer', 'admin')
+      select 1
+      from profiles p
+      join issues i on i.id = issue_status_history.issue_id
+      where p.id = auth.uid()
+        and p.role in ('officer', 'admin')
+        and (p.role = 'admin' or p.department_id = i.department_id)
     )
   );
 
@@ -656,6 +919,10 @@ create policy "issue_volunteer_offers_select_authenticated" on issue_volunteer_o
 create policy "issue_volunteer_offers_insert_own" on issue_volunteer_offers
   for insert to authenticated with check (offered_by = auth.uid());
 
+-- Accepting an offer is an officer's call. Letting the offerer write any
+-- status meant a citizen could mark their own offer accepted and then
+-- completed, and it would show on the officer's dashboard as approved
+-- work nobody approved. The offerer may only withdraw.
 create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volunteer_offers
   for update to authenticated using (
     offered_by = auth.uid()
@@ -664,11 +931,11 @@ create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volu
       where p.id = auth.uid() and p.role in ('officer', 'admin')
     )
   ) with check (
-    offered_by = auth.uid()
-    or exists (
+    exists (
       select 1 from profiles p
       where p.id = auth.uid() and p.role in ('officer', 'admin')
     )
+    or (offered_by = auth.uid() and status = 'withdrawn')
   );
 
 -- push_subscriptions: a citizen manages only their own devices. Fan-out

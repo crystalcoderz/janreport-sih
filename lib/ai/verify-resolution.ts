@@ -1,9 +1,8 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
+import { isAllowedPhotoUrl } from "@/lib/storage";
+import { getAiClient, AI_MODEL } from "@/lib/ai/client";
 import type { ResolutionVerdict } from "@/lib/supabase/types";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
@@ -41,7 +40,15 @@ const RESPONSE_SCHEMA = {
 async function fetchImageAsBase64(
   url: string
 ): Promise<{ data: string; mimeType: string }> {
-  const res = await fetch(url);
+  // Belt-and-braces against SSRF: the status route already rejects photo
+  // URLs off our storage hosts, but this is the function that actually
+  // makes the outbound request, so it re-checks rather than trusting that
+  // every present and future caller validated first.
+  if (!isAllowedPhotoUrl(url)) {
+    throw new Error(`Refusing to fetch image from a non-storage host: ${url}`);
+  }
+
+  const res = await fetch(url, { redirect: "error" });
   if (!res.ok) {
     throw new Error(`Failed to fetch image (${res.status}): ${url}`);
   }
@@ -80,8 +87,8 @@ export async function verifyResolution(params: {
   const categoryLabel =
     CATEGORY_LABELS[params.category as IssueCategory] ?? params.category;
 
-  const response = await ai.models.generateContent({
-    model: MODEL,
+  const response = await getAiClient().models.generateContent({
+    model: AI_MODEL,
     contents: [
       { text: "BEFORE photo — the issue as originally reported by a citizen:" },
       { inlineData: { mimeType: before.mimeType, data: before.data } },

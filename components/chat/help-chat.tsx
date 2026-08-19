@@ -3,19 +3,51 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageCircle, X, Send, Sparkles } from "lucide-react";
+import { MessageCircle, X, Send, Sparkles, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  toolsUsed?: string[];
 }
 
 const GREETING: ChatMessage = {
   role: "assistant",
   content:
-    "Hi! I'm the JanReport help assistant. Ask me how to report an issue, track a report, or use the map, leaderboard, or volunteer program.",
+    "Hi! I'm the JanReport help assistant — I can check the live status of your reports, look up any issue, or find what's been reported near you. What do you need?",
 };
+
+// Human-readable labels for the activity chips, so citizens see this
+// actually looked something up rather than trusting a canned answer.
+const TOOL_LABELS: Record<string, string> = {
+  get_my_reports: "Checked your reports",
+  get_issue_details: "Looked up issue details",
+  find_nearby_issues: "Searched nearby issues",
+  get_city_stats: "Pulled city-wide stats",
+};
+
+// The model is told to answer in plain text, but it reaches for markdown
+// anyway ("You've filed **9 reports**"), and a chat bubble renders that
+// literally — asterisks and all. Convert the two things it actually emits
+// rather than pulling in a markdown renderer for a 4-sentence reply.
+function renderReply(text: string): React.ReactNode {
+  return text.split("\n").map((line, lineIndex) => (
+    <span key={lineIndex}>
+      {lineIndex > 0 && <br />}
+      {line
+        .replace(/^\s*[-*]\s+/, "• ")
+        .split(/(\*\*[^*\n]+\*\*)/g)
+        .map((part, i) =>
+          part.length > 4 && part.startsWith("**") && part.endsWith("**") ? (
+            <strong key={i}>{part.slice(2, -2)}</strong>
+          ) : (
+            part
+          )
+        )}
+    </span>
+  ));
+}
 
 export function HelpChat() {
   const [open, setOpen] = useState(false);
@@ -41,7 +73,11 @@ export function HelpChat() {
       const res = await fetch("/api/kimi/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next.filter((m) => m !== GREETING) }),
+        body: JSON.stringify({
+          messages: next
+            .filter((m) => m !== GREETING)
+            .map(({ role, content }) => ({ role, content })),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -51,7 +87,10 @@ export function HelpChat() {
         ]);
         return;
       }
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.reply, toolsUsed: data.toolsUsed },
+      ]);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -97,14 +136,31 @@ export function HelpChat() {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={cn(
-              "max-w-[85%] rounded-lg px-3 py-2 text-sm",
-              m.role === "user"
-                ? "ml-auto bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            )}
+            className={cn("flex flex-col gap-1", m.role === "user" && "items-end")}
           >
-            {m.content}
+            <div
+              className={cn(
+                "max-w-[85%] rounded-lg px-3 py-2 text-sm break-words whitespace-pre-wrap",
+                m.role === "user"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground"
+              )}
+            >
+              {m.role === "assistant" ? renderReply(m.content) : m.content}
+            </div>
+            {m.toolsUsed && m.toolsUsed.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {[...new Set(m.toolsUsed)].map((tool) => (
+                  <span
+                    key={tool}
+                    className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] text-muted-foreground"
+                  >
+                    <CheckCircle2 className="size-3 text-primary" />
+                    {TOOL_LABELS[tool] ?? tool}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {sending && (

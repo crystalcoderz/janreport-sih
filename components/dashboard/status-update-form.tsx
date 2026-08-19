@@ -106,7 +106,9 @@ export function StatusUpdateForm({
         <Label>Status</Label>
         <Select value={status} onValueChange={(v) => setStatus(v as IssueStatus)}>
           <SelectTrigger>
-            <SelectValue />
+            <SelectValue>
+              {(v) => STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {STATUS_OPTIONS.map((opt) => (

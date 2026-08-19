@@ -5,14 +5,25 @@ import OpenAI from "openai";
 const apiKey = process.env.KIMI_API_KEY;
 const baseURL = process.env.KIMI_API_BASE_URL || "https://api.moonshot.ai/v1";
 
-// Overridable without a redeploy in case this id goes stale.
-const MODEL = process.env.KIMI_MODEL || "kimi-k2-0711-preview";
+// Overridable without a redeploy in case this id goes stale. Verified
+// live against this key/endpoint — kimi-k2-0711-preview 404s ("not found
+// or permission denied"), kimi-k3 works and supports tool calling.
+export const KIMI_MODEL = process.env.KIMI_MODEL || "kimi-k3";
 
 export function isKimiConfigured(): boolean {
   return Boolean(apiKey);
 }
 
-const kimi = apiKey ? new OpenAI({ apiKey, baseURL }) : null;
+// Exposed for lib/kimi/agent.ts, which needs the raw client to drive its
+// own tool-calling loop. kimiChat() below stays the simple text-only path
+// for the one-shot features (briefing, note drafting).
+// maxRetries/timeout are explicit because the SDK defaults (2 retries, 10
+// minute timeout) turn a Moonshot rate-limit into a lambda pinned for
+// minutes while the citizen waits on a WhatsApp reply that will never come.
+// Failing fast surfaces the throttle instead of hiding it.
+export const kimi = apiKey
+  ? new OpenAI({ apiKey, baseURL, maxRetries: 1, timeout: 20_000 })
+  : null;
 
 export interface KimiMessage {
   role: "system" | "user" | "assistant";
@@ -28,9 +39,10 @@ export async function kimiChat(
   }
 
   const completion = await kimi.chat.completions.create({
-    model: MODEL,
+    model: KIMI_MODEL,
     messages,
-    temperature: options?.temperature ?? 0.6,
+    // kimi-k3 rejects any temperature other than the default (1).
+    temperature: options?.temperature ?? 1,
     max_tokens: options?.maxTokens ?? 800,
   });
 

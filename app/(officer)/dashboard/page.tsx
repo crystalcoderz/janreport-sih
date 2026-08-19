@@ -9,7 +9,7 @@ export default async function DashboardPage() {
   const [{ data: issues }, { data: departments }] = await Promise.all([
     supabase
       .from("issues")
-      .select("*, departments(name)")
+      .select("*, departments(name), teams(name)")
       .order("created_at", { ascending: false })
       .limit(200),
     supabase.from("departments").select("*").order("name"),

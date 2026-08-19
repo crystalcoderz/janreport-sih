@@ -3,6 +3,7 @@ import Image from "next/image";
 import { formatDistanceToNow } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
+import { googleMapsLink } from "@/lib/geo";
 import { SeverityBadge } from "@/components/issue/severity-badge";
 import { StatusBadge } from "@/components/issue/status-badge";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
@@ -94,15 +95,22 @@ export default async function PublicIssueDetailPage({
         <p className="mt-1 text-muted-foreground">{issue.description}</p>
       </div>
       <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-        <span className="flex items-center gap-1.5">
+        <a
+          href={googleMapsLink(issue.lat, issue.lng)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 hover:underline"
+        >
           <MapPin className="size-4" />
           {issue.address ?? `${issue.lat.toFixed(5)}, ${issue.lng.toFixed(5)}`}
-        </span>
+        </a>
         <span className="flex items-center gap-1.5">
           <User className="size-4" />
           Reported by{" "}
-          {(issue as { profiles?: { full_name: string | null } }).profiles
-            ?.full_name ?? "a citizen"}{" "}
+          {issue.reporter_name ??
+            (issue as { profiles?: { full_name: string | null } }).profiles
+              ?.full_name ??
+            "a citizen"}{" "}
           ·{" "}
           {formatDistanceToNow(new Date(issue.created_at), {
             addSuffix: true,

@@ -110,7 +110,7 @@ export default function ReportPage() {
         setView({ step: "success", issue: data.issue });
       }
     } catch {
-      toast.error("Network error. Please try again.");
+      toast.error(t("report.networkError"));
     } finally {
       setSubmitting(false);
     }
@@ -121,10 +121,10 @@ export default function ReportPage() {
       method: "POST",
     });
     if (res.ok) {
-      toast.success("Upvoted the existing report — thanks for confirming it!");
+      toast.success(t("report.upvotedExisting"));
       resetForm();
     } else {
-      toast.error("Could not upvote. Please try again.");
+      toast.error(t("report.upvoteFailed"));
     }
   }
 
@@ -316,11 +316,13 @@ function DuplicatesCard({
       <Card>
         <CardHeader>
           <CardTitle>{t("report.duplicateTitle")}</CardTitle>
-          <CardDescription>
-            We found {duplicates.length} similar{" "}
-            {t(categoryKey(classification.category))} report
-            {duplicates.length > 1 ? "s" : ""} nearby. Upvoting boosts its
-            priority instead of creating a duplicate ticket.
+          <CardDescription className="flex flex-col gap-1">
+            {/* A label pair rather than a sentence: it carries the count and
+                category without needing grammar that differs per language. */}
+            <span className="font-medium">
+              {t(categoryKey(classification.category))} · {duplicates.length}
+            </span>
+            {t("report.duplicateBody")}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

@@ -4,19 +4,29 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { Camera, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "@/lib/i18n/context";
+import { downscaleImage } from "@/lib/image-resize";
 
 export function PhotoCapture({
   onChange,
 }: {
   onChange: (file: File | null) => void;
 }) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
-  function handleFile(file: File | null) {
+  async function handleFile(file: File | null) {
     if (preview) URL.revokeObjectURL(preview);
-    setPreview(file ? URL.createObjectURL(file) : null);
-    onChange(file);
+    if (!file) {
+      setPreview(null);
+      onChange(null);
+      return;
+    }
+    // Preview immediately from the original so the UI never waits on the
+    // canvas work, then hand the caller the downscaled copy.
+    setPreview(URL.createObjectURL(file));
+    onChange(await downscaleImage(file));
   }
 
   if (preview) {
@@ -24,7 +34,7 @@ export function PhotoCapture({
       <div className="relative overflow-hidden rounded-lg border">
         <Image
           src={preview}
-          alt="Selected issue photo"
+          alt={t("report.photoAlt")}
           width={640}
           height={480}
           unoptimized
@@ -36,7 +46,7 @@ export function PhotoCapture({
           size="icon"
           className="absolute right-2 top-2"
           onClick={() => {
-            handleFile(null);
+            void handleFile(null);
             if (inputRef.current) inputRef.current.value = "";
           }}
         >
@@ -53,14 +63,14 @@ export function PhotoCapture({
       className="flex h-64 w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary"
     >
       <Camera className="size-8" />
-      <span className="text-sm font-medium">Tap to take or upload a photo</span>
+      <span className="text-sm font-medium">{t("report.photoPrompt")}</span>
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+        onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
       />
     </button>
   );

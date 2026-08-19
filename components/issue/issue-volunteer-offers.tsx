@@ -145,7 +145,13 @@ export function IssueVolunteerOffers({
           {myGroups.length > 0 && (
             <Select value={groupId} onValueChange={(v) => v && setGroupId(v)}>
               <SelectTrigger className="w-56">
-                <SelectValue />
+                <SelectValue>
+                  {(v) =>
+                    v === "self"
+                      ? "Offer as myself"
+                      : (myGroups.find((g) => g.id === v)?.name ?? "Offer as myself")
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="self">Offer as myself</SelectItem>

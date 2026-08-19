@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
+import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import { LazyIssueMap } from "@/components/map/lazy-issue-map";
 import { StatusBadge } from "@/components/issue/status-badge";
@@ -14,7 +15,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { CATEGORY_LABELS, ISSUE_CATEGORIES, severityColor } from "@/lib/departments";
+import {
+  CATEGORY_LABELS,
+  ISSUE_CATEGORIES,
+  severityColor,
+  type IssueCategory,
+} from "@/lib/departments";
 import type { Database } from "@/lib/supabase/types";
 import { ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
@@ -31,7 +37,6 @@ export function MapPageClient({
   upvotedIssueIds: string[];
 }) {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [heatmap, setHeatmap] = useState(false);
   const [upvoted, setUpvoted] = useState<Set<string>>(
     new Set(upvotedIssueIds)
   );
@@ -80,7 +85,13 @@ export function MapPageClient({
       <div className="flex flex-wrap items-center gap-3">
         <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v ?? "all")}>
           <SelectTrigger className="w-56">
-            <SelectValue />
+            <SelectValue>
+              {(v) =>
+                v === "all"
+                  ? "All categories"
+                  : (CATEGORY_LABELS[v as IssueCategory] ?? v)
+              }
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All categories</SelectItem>
@@ -91,18 +102,11 @@ export function MapPageClient({
             ))}
           </SelectContent>
         </Select>
-        <Button
-          variant={heatmap ? "default" : "outline"}
-          onClick={() => setHeatmap((v) => !v)}
-        >
-          {heatmap ? "Showing heatmap" : "Show heatmap"}
-        </Button>
         <Legend />
       </div>
 
       <LazyIssueMap
         issues={filtered}
-        heatmap={heatmap}
         renderPopup={(issue) => (
           <MapPopup
             issue={issue}
@@ -128,22 +132,32 @@ function MapPopup({
   onToggleUpvote: () => void;
 }) {
   return (
-    <div className="flex w-52 flex-col gap-2">
+    <div className="flex w-60 flex-col gap-2">
       <Image
         src={issue.photo_url}
         alt={issue.title}
-        width={200}
-        height={100}
+        width={240}
+        height={128}
         unoptimized
-        className="h-24 w-full rounded object-cover"
+        className="h-28 w-full rounded object-cover"
       />
+      {/* Where and when, above the title — a pin on a map is only useful
+          once you know which street it is and whether it is fresh. */}
+      <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
+        {issue.address && (
+          <span className="line-clamp-2 flex-1">{issue.address}</span>
+        )}
+        <span className="shrink-0">
+          {formatDistanceToNow(new Date(issue.created_at), { addSuffix: true })}
+        </span>
+      </div>
       <p className="font-medium leading-tight">{issue.title}</p>
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusBadge status={issue.status} />
         <SeverityBadge severity={issue.ai_severity} />
       </div>
       <p className="text-xs text-muted-foreground">
-        {issue.departments?.name ?? "Unassigned"}
+        {issue.departments?.name ?? "Not yet assigned"}
       </p>
       <Button size="sm" variant={upvoted ? "secondary" : "outline"} onClick={onToggleUpvote}>
         <ThumbsUp className="size-3.5" />

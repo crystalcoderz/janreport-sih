@@ -38,6 +38,89 @@ export async function sendWhatsAppText(to: string, body: string) {
   });
 }
 
+// Interactive "reply buttons" — WhatsApp allows at most 3, with titles up
+// to 20 characters. Tapping one comes back as an inbound message of type
+// "interactive" carrying the button's id, which the webhook maps back to a
+// category (see QUICK_REPORT_BUTTONS).
+export async function sendWhatsAppButtons(
+  to: string,
+  body: string,
+  buttons: { id: string; title: string }[]
+) {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  return callGraphApi(`${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: body.slice(0, 1024) },
+        action: {
+          buttons: buttons.slice(0, 3).map((b) => ({
+            type: "reply",
+            reply: { id: b.id, title: b.title.slice(0, 20) },
+          })),
+        },
+      },
+    }),
+  });
+}
+
+// Marks the citizen's message read and shows the "typing…" bubble. Costs
+// one cheap call but changes the whole feel of a turn that needs an LLM
+// round-trip: they see the bot working instead of dead air. WhatsApp keeps
+// the indicator up for ~25s or until the next message, so there's nothing
+// to clear afterwards. Best-effort — never let this block a real reply.
+export async function markWhatsAppTyping(messageId: string) {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  return callGraphApi(`${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: messageId,
+      typing_indicator: { type: "text" },
+    }),
+  });
+}
+
+export async function sendWhatsAppImage(to: string, imageUrl: string, caption?: string) {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  return callGraphApi(`${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "image",
+      image: { link: imageUrl, ...(caption ? { caption } : {}) },
+    }),
+  });
+}
+
+export async function sendWhatsAppDocument(
+  to: string,
+  documentUrl: string,
+  filename: string,
+  caption?: string
+) {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  return callGraphApi(`${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "document",
+      document: { link: documentUrl, filename, ...(caption ? { caption } : {}) },
+    }),
+  });
+}
+
 // Sends the OTP via an approved "authentication" template if
 // WHATSAPP_OTP_TEMPLATE_NAME is set (required for business-initiated
 // messages outside a 24h user-reply window — see README). Falls back to a
@@ -65,8 +148,32 @@ export async function sendWhatsAppOtpTemplate(to: string, code: string) {
         language: { code: "en_US" },
         components: [
           { type: "body", parameters: [{ type: "text", text: code }] },
+          // Authentication templates carry a copy-code/autofill button, and
+          // Meta requires the code repeated as that button's parameter —
+          // sending only the body fails the whole message on a parameter
+          // count mismatch rather than just dropping the button.
+          {
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: code }],
+          },
         ],
       },
+    }),
+  });
+}
+
+export async function sendWhatsAppAudio(to: string, audioUrl: string) {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  return callGraphApi(`${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "audio",
+      audio: { link: audioUrl },
     }),
   });
 }
