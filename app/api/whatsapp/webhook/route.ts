@@ -16,12 +16,16 @@ import {
   saveLocationToSession,
   saveNoteToSession,
   saveReporterNameToSession,
+  saveReporterEmailToSession,
   getReportSessionState,
   clearReportSessionIfStale,
   finalizeReportIfReady,
   clearReportSession,
 } from "@/lib/whatsapp/report";
 import { extractStatedName } from "@/lib/whatsapp/name-detection";
+import { extractEmail, isEmailDecline } from "@/lib/whatsapp/email-detection";
+import { sendEmail } from "@/lib/email/client";
+import { reportFiledEmail } from "@/lib/email/templates";
 import { isLinkRequest } from "@/lib/whatsapp/link-request";
 import { isCancelRequest } from "@/lib/whatsapp/cancel-request";
 import { resolvePendingReportInput } from "@/lib/whatsapp/pending-input";
@@ -192,6 +196,35 @@ async function fileCompletedReport(phone: string): Promise<boolean> {
 
   if (result.status === "filed") {
     const { issue } = result;
+
+    // Best-effort and awaited only for its own errors: a citizen's report is
+    // already filed by this point and must never fail because SMTP did.
+    let emailedTo: string | null = null;
+    if (issue.reporterEmail) {
+      const mail = reportFiledEmail(
+        {
+          id: issue.id,
+          title: issue.title,
+          description: issue.description,
+          category: issue.category,
+          severity: issue.severityScore,
+          severityLabel: issue.severity,
+          status: "reported",
+          department: issue.department,
+          address: issue.address,
+          lat: issue.lat,
+          lng: issue.lng,
+          photoUrl: issue.photoUrl,
+          reporterName: issue.reporterName,
+          createdAt: new Date().toISOString(),
+        },
+        `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${issue.id}`
+      );
+      const sent = await sendEmail({ to: issue.reporterEmail, ...mail });
+      if (sent.ok) emailedTo = issue.reporterEmail;
+      else console.error("Failed to email the filed-report confirmation", sent.error);
+    }
+
     await sendWhatsAppText(
       phone,
       `✅ *Report filed!*\n` +
@@ -201,7 +234,13 @@ async function fileCompletedReport(phone: string): Promise<boolean> {
         `*Department:* ${issue.department ?? "Being assigned"}\n` +
         `*Location:* ${issue.mapsLink}\n` +
         `*Report ID:* ${issue.id.slice(0, 8)}\n\n` +
-        `You'll receive updates as the status changes.`
+        (emailedTo
+          ? `
+📧 A copy is on its way to ${emailedTo}.`
+          : "") +
+        `
+
+You'll receive updates as the status changes.`
     );
     return true;
   }
@@ -601,6 +640,16 @@ async function handleMessage(message: WhatsAppMessage) {
           await saveReporterNameToSession(phone, statedName);
           sessionAdvanced = true;
         }
+
+        // An address anywhere in the message is unambiguous, so take it
+        // without waiting to be asked. A decline only counts as an answer
+        // when the bot is actually waiting on the email, otherwise a bare
+        // "no" earlier in the conversation would silently opt them out.
+        const statedEmail = extractEmail(body);
+        if (statedEmail) {
+          await saveReporterEmailToSession(phone, statedEmail);
+          sessionAdvanced = true;
+        }
         break;
       }
       case "interactive": {
@@ -661,6 +710,21 @@ async function handleMessage(message: WhatsAppMessage) {
 
     let session = initialSession;
 
+    // "no" / "skip" / "nahi" only means "no email" when that is the question
+    // on the table: the report is otherwise complete and we have asked.
+    if (
+      freeText &&
+      !session.emailSettled &&
+      session.hasPhoto &&
+      session.hasLocation &&
+      session.hasName &&
+      isEmailDecline(freeText)
+    ) {
+      await saveReporterEmailToSession(phone, null);
+      session = { ...session, emailSettled: true };
+      sessionAdvanced = true;
+    }
+
     if (freeText && isCancelRequest(freeText)) {
       await handleCancelRequest(
         phone,
@@ -712,6 +776,25 @@ async function handleMessage(message: WhatsAppMessage) {
     // complete, regardless of which path completed it. Skipped for
     // greetings so a bare "hi" arriving after an old, already-complete
     // session doesn't unexpectedly file it.
+    // The report is complete except for an optional email. Ask once, then
+    // file on the next message whatever they say — a reply that is neither an
+    // address nor a decline still marks the question asked, so nobody gets
+    // stuck in a loop over a field that was never required.
+    if (
+      !isGreeting &&
+      sessionAdvanced &&
+      session.hasPhoto &&
+      session.hasLocation &&
+      session.hasName &&
+      !session.emailSettled
+    ) {
+      await sendWhatsAppText(
+        phone,
+        `📧 Last thing — what's your email address? I'll send you a copy of the report and updates when it's fixed.\n\nReply *skip* if you'd rather not; the report still gets filed either way.`
+      );
+      return;
+    }
+
     if (
       !isGreeting &&
       sessionAdvanced &&

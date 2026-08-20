@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { verifyResolution } from "@/lib/ai/verify-resolution";
+import { sendEmail } from "@/lib/email/client";
+import { statusChangedEmail, resolvedEmail } from "@/lib/email/templates";
+import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { isAllowedPhotoUrl } from "@/lib/storage";
 import type { IssueStatus, ResolutionVerdict } from "@/lib/supabase/types";
@@ -46,6 +49,16 @@ export async function PATCH(
       { status: 400 }
     );
   }
+
+  // Read before the write so the email can say what it moved *from*. Cheap,
+  // and the alternative — inferring it from the history table — races with
+  // the row this same request is about to insert.
+  const { data: prior } = await supabase
+    .from("issues")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  const previousStatus = (prior?.status ?? "reported") as IssueStatus;
 
   // RLS (issues_update_officer_admin) enforces that only an officer for
   // this issue's department, or an admin, can perform this update.
@@ -107,6 +120,50 @@ export async function PATCH(
       }
     } catch (err) {
       console.error("Resolution verification failed", err);
+    }
+  }
+
+  // Email the citizen, if they gave an address. After the verdict block on
+  // purpose, so a resolution email carries the AI's verdict rather than
+  // arriving first and contradicting it. Best-effort: the status change has
+  // already succeeded and must not be undone by a mail failure.
+  if (verified.reporter_email) {
+    try {
+      const data = {
+        id: verified.id,
+        title: verified.title,
+        description: verified.description,
+        category: CATEGORY_LABELS[verified.ai_category as IssueCategory] ?? verified.ai_category,
+        severity: verified.ai_severity,
+        severityLabel: verified.ai_severity_label,
+        status: verified.status as IssueStatus,
+        department: null,
+        address: verified.address,
+        lat: verified.lat,
+        lng: verified.lng,
+        photoUrl: verified.photo_url,
+        reporterName: verified.reporter_name,
+        createdAt: verified.created_at,
+      };
+      const viewUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${verified.id}`;
+      const mail =
+        status === "resolved"
+          ? resolvedEmail(
+              data,
+              {
+                verdict: verified.resolution_verdict ?? "unclear",
+                reason: verified.resolution_verdict_reason,
+                confidence: verified.resolution_verdict_confidence,
+              },
+              verified.resolution_photo_url,
+              viewUrl
+            )
+          : statusChangedEmail(data, previousStatus, note, viewUrl);
+
+      const sent = await sendEmail({ to: verified.reporter_email, ...mail });
+      if (!sent.ok) console.error("Failed to email the status update", sent.error);
+    } catch (err) {
+      console.error("Status-update email threw", err);
     }
   }
 

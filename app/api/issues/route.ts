@@ -2,6 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { classifyIssuePhoto, rejectionFor } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
+import { sendEmail } from "@/lib/email/client";
+import { reportFiledEmail } from "@/lib/email/templates";
+import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 import {
   uploadIssuePhoto,
@@ -34,6 +37,11 @@ export async function POST(request: NextRequest) {
   const lng = Number(formData.get("lng"));
   const note = formData.get("note")?.toString().slice(0, 500) || undefined;
   const forceNew = formData.get("forceNew") === "true";
+  // Optional by design: a citizen without an email must still be able to
+  // report. Trimmed and lowercased; a malformed value simply never receives
+  // mail rather than blocking the report.
+  const rawEmail = formData.get("email")?.toString().trim().toLowerCase() || undefined;
+  const reporterEmail = rawEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(rawEmail) ? rawEmail : undefined;
 
   if (!(photo instanceof File)) {
     return NextResponse.json({ error: "Photo is required" }, { status: 400 });
@@ -195,6 +203,7 @@ export async function POST(request: NextRequest) {
       lng,
       address: address ?? undefined,
       department_id: departmentResult.data?.id ?? null,
+      reporter_email: reporterEmail ?? null,
     })
     .select("*, departments(name)")
     .single();
@@ -208,6 +217,31 @@ export async function POST(request: NextRequest) {
   }
 
   await pushNearbyIssueAlerts(issue.id);
+
+  // Confirmation email. Best-effort: the report is already saved.
+  if (reporterEmail) {
+    const mail = reportFiledEmail(
+      {
+        id: issue.id,
+        title: issue.title,
+        description: issue.description,
+        category: CATEGORY_LABELS[issue.ai_category as IssueCategory] ?? issue.ai_category,
+        severity: issue.ai_severity,
+        severityLabel: issue.ai_severity_label,
+        status: "reported",
+        department: issue.departments?.name ?? null,
+        address: issue.address,
+        lat: issue.lat,
+        lng: issue.lng,
+        photoUrl: issue.photo_url,
+        reporterName: issue.reporter_name,
+        createdAt: issue.created_at,
+      },
+      `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${issue.id}`
+    );
+    const sent = await sendEmail({ to: reporterEmail, ...mail });
+    if (!sent.ok) console.error("Failed to email the filed-report confirmation", sent.error);
+  }
 
   return NextResponse.json({ issue }, { status: 201 });
 }

@@ -135,6 +135,24 @@ export async function saveReporterNameToSession(phone: string, name: string): Pr
   });
 }
 
+// An email is optional, so the session has to distinguish three states, not
+// two: never asked, gave an address, and explicitly declined. Storing the
+// sentinel for a decline is what stops the bot asking again on every
+// subsequent turn of the same report.
+export const EMAIL_DECLINED = "-";
+
+export async function saveReporterEmailToSession(
+  phone: string,
+  email: string | null
+): Promise<void> {
+  const supabase = createServiceRoleClient();
+  await supabase.from("whatsapp_report_sessions").upsert({
+    phone,
+    reporter_email: email ? email.trim().slice(0, 200).toLowerCase() : EMAIL_DECLINED,
+    updated_at: new Date().toISOString(),
+  });
+}
+
 // What's currently sitting in this phone's in-progress report, so the
 // agent can be told what it still needs instead of guessing.
 // Abandoned sessions (citizen sent a photo, then never came back) would
@@ -174,6 +192,8 @@ export async function getReportSessionState(phone: string): Promise<{
   hasLocation: boolean;
   hasNote: boolean;
   hasName: boolean;
+  /** True once they have given an address OR declined — either way, stop asking. */
+  emailSettled: boolean;
 }> {
   const supabase = createServiceRoleClient();
   const { data: session } = await supabase
@@ -183,14 +203,20 @@ export async function getReportSessionState(phone: string): Promise<{
     // of Postgres per turn purely to test it for null. photo_mime_type is
     // written in the same statement as the photo and never without it, so it
     // answers "is there a photo?" for a few bytes.
-    .select("photo_mime_type, lat, lng, note, reporter_name, updated_at")
+    .select("photo_mime_type, lat, lng, note, reporter_name, reporter_email, updated_at")
     .eq("phone", phone)
     .maybeSingle();
 
   const stale =
     !!session && Date.now() - new Date(session.updated_at).getTime() > SESSION_STALE_AFTER_MS;
   if (!session || stale) {
-    return { hasPhoto: false, hasLocation: false, hasNote: false, hasName: false };
+    return {
+      hasPhoto: false,
+      hasLocation: false,
+      hasNote: false,
+      hasName: false,
+      emailSettled: false,
+    };
   }
 
   return {
@@ -198,6 +224,7 @@ export async function getReportSessionState(phone: string): Promise<{
     hasLocation: session.lat != null && session.lng != null,
     hasNote: Boolean(session.note),
     hasName: Boolean(session.reporter_name),
+    emailSettled: Boolean(session.reporter_email),
   };
 }
 
@@ -227,6 +254,15 @@ export type FinalizeReportResult =
         department: string | null;
         mapsLink: string;
         reporterName: string;
+        // Everything below exists so the caller can render the confirmation
+        // email without a second round trip to fetch the row it just wrote.
+        description: string;
+        severityScore: number;
+        address: string | null;
+        lat: number;
+        lng: number;
+        photoUrl: string;
+        reporterEmail: string | null;
       };
     }
   // The photo does not show a civic issue at all. Kept distinct from
@@ -405,6 +441,11 @@ export async function finalizeReportIfReady(
       address: address ?? undefined,
       department_id: departmentResult.data?.id ?? null,
       reporter_name: session.reporter_name,
+      // EMAIL_DECLINED is a sentinel, not an address — never store it.
+      reporter_email:
+        session.reporter_email && session.reporter_email !== EMAIL_DECLINED
+          ? session.reporter_email
+          : null,
     })
     .select("*, departments(name)")
     .single();
@@ -433,6 +474,16 @@ export async function finalizeReportIfReady(
       department: issue.departments?.name ?? null,
       mapsLink: googleMapsLink(issue.lat, issue.lng),
       reporterName: session.reporter_name,
+      description: classification.description,
+      severityScore: classification.severity,
+      address: address ?? null,
+      lat: issue.lat,
+      lng: issue.lng,
+      photoUrl: publicUrl,
+      reporterEmail:
+        session.reporter_email && session.reporter_email !== EMAIL_DECLINED
+          ? session.reporter_email
+          : null,
     },
   };
 }

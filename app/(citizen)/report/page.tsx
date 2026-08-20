@@ -9,6 +9,7 @@ import { useGeolocation } from "@/lib/hooks/use-geolocation";
 import { useSpeechToText } from "@/lib/hooks/use-speech-to-text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Card,
@@ -51,6 +52,7 @@ export default function ReportPage() {
     useGeolocation();
   const [photo, setPhoto] = useState<File | null>(null);
   const [note, setNote] = useState("");
+  const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [view, setView] = useState<ViewState>({ step: "form" });
   const speech = useSpeechToText();
@@ -86,6 +88,7 @@ export default function ReportPage() {
       formData.set("lat", String(position.lat));
       formData.set("lng", String(position.lng));
       if (note) formData.set("note", note);
+      if (email) formData.set("email", email);
       if (forceNew) formData.set("forceNew", "true");
 
       const res = await fetch("/api/issues", {
@@ -187,6 +190,20 @@ export default function ReportPage() {
               </Button>
             )}
             {geoError && <p className="text-sm text-destructive">{geoError}</p>}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="email">{t("report.emailLabel")}</Label>
+            <Input
+              id="email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder={t("report.emailPlaceholder")}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">{t("report.emailHint")}</p>
           </div>
 
           <div className="flex flex-col gap-2">

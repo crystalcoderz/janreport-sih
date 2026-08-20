@@ -119,6 +119,9 @@ create table issues (
   -- which is usually null there and may not be the person at the issue) —
   -- used to personalize the officer-facing acknowledgement letter.
   reporter_name text,
+  -- Optional. Citizens who give one get a filed-report confirmation and an
+  -- email on every status change; those who do not still report normally.
+  reporter_email text,
   acknowledgement_sent_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -229,6 +232,7 @@ create table whatsapp_report_sessions (
   lng double precision,
   note text,
   reporter_name text,
+  reporter_email text,
   updated_at timestamptz not null default now()
 );
 

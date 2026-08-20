@@ -99,6 +99,7 @@ export interface Database {
           assigned_team_id: string | null;
           assigned_at: string | null;
           reporter_name: string | null;
+          reporter_email: string | null;
           acknowledgement_sent_at: string | null;
           created_at: string;
           updated_at: string;
@@ -129,6 +130,7 @@ export interface Database {
           assigned_team_id?: string | null;
           assigned_at?: string | null;
           reporter_name?: string | null;
+          reporter_email?: string | null;
           acknowledgement_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -416,6 +418,7 @@ export interface Database {
           lng: number | null;
           note: string | null;
           reporter_name: string | null;
+          reporter_email: string | null;
           updated_at: string;
         };
         Insert: {
@@ -426,6 +429,7 @@ export interface Database {
           lng?: number | null;
           note?: string | null;
           reporter_name?: string | null;
+          reporter_email?: string | null;
           updated_at?: string;
         };
         Update: Partial<
