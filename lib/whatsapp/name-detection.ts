@@ -17,7 +17,13 @@
 // so the case-insensitive anchor and the case-sensitive name capture are
 // deliberately two separate regexes applied in sequence, not one pattern
 // with a flag.
-const NAME_ANCHOR_RE = /\b(?:my name is|mera naam(?: hai)?)\s*[:-]?\s*/i;
+// Citizens write Hinglish phonetically and inconsistently: "mera naam hai",
+// "mera nam ha", "mera naam h", "myself Rohit". Accepting only "my name is"
+// and "mera naam [hai]" meant a real citizen writing "Mera Nam ha Prayas
+// Sharma" had their name silently dropped — the agent then replied "Name
+// noted: Prayas Sharma" with nothing saved, and asked for it again next turn.
+const NAME_ANCHOR_RE =
+  /\b(?:my name is|myself|mera\s+naa?m\s*(?:hai|hay|he|ha|h)?)\s*[:-]?\s*/i;
 const NAME_CAPTURE_RE =
   /^([a-zA-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*(?:\s+[A-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*){0,3})/;
 

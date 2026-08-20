@@ -23,6 +23,13 @@ const PLACE_WORDS = new Set([
   "tower", "complex", "apartment", "apartments", "residency", "residence",
   "village", "town", "city", "district", "tehsil", "near", "opposite",
   "behind", "beside", "front",
+  // Hinglish, which is how citizens actually write a location: "ghar ke
+  // pas" (near the house), "station ke samne" (opposite the station).
+  // Without these, "Prayas ke ghar ke pas, Uttar Pradesh, Delhi" carried no
+  // recognised place word at all and was dropped on the floor.
+  "ghar", "makan", "makaan", "pas", "paas", "nazdeek", "samne", "saamne",
+  "peeche", "piche", "mohalla", "basti", "ilaka", "chauraha", "gaon",
+  "kasba", "naka", "tiraha", "modh", "mod",
 ]);
 
 // The other thing a citizen types mid-report that is short, unpunctuated
@@ -70,6 +77,25 @@ function isBareAnswer(text: string): boolean {
   return true;
 }
 
+// A longer message that is still an answer to "where is it?" — it names a
+// place ("ghar ke pas", "sector 62", "near city hospital") and is short
+// enough to be an answer rather than a story. Deliberately capped: past this
+// the citizen is describing the problem, and that belongs to the agent.
+const LOCATION_PHRASE_MAX_WORDS = 14;
+const LOCATION_PHRASE_MAX_CHARS = 120;
+
+export function looksLikeLocationPhrase(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 2 || trimmed.length > LOCATION_PHRASE_MAX_CHARS) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length > LOCATION_PHRASE_MAX_WORDS) return false;
+  if (trimmed.includes("?") || NOT_AN_ANSWER_RE.test(trimmed)) return false;
+  // Must actually name a place, or carry a number (a sector/plot/house).
+  const normalized = words.map((w) => w.toLowerCase().replace(/[^a-z0-9ऀ-ॿ]/g, ""));
+  if (normalized.some((w) => ISSUE_WORDS.has(w))) return false;
+  return normalized.some((w) => PLACE_WORDS.has(w)) || /\d/.test(trimmed);
+}
+
 export function looksLikeBareName(text: string): boolean {
   const trimmed = text.trim();
   if (!isBareAnswer(trimmed) || !NAME_SHAPE_RE.test(trimmed)) return false;
@@ -92,8 +118,18 @@ export async function resolvePendingReportInput(params: {
   hasName: boolean;
 }): Promise<PendingInputResolution | null> {
   const text = params.text.trim();
-  if (!isBareAnswer(text)) return null;
   if (params.hasLocation && params.hasName) return null;
+
+  // A name is always a short fragment, so the bare-answer shape still gates
+  // it. A location is not: "Prayas ke ghar ke pas, Uttar Pradesh, Delhi" is
+  // seven words and was rejected outright by the six-word cap, so nothing was
+  // saved and the agent invented "Location mil gayi". A longer message still
+  // counts as a location attempt when it carries a place word, which is the
+  // same signal used to tell a place from a person below.
+  const bare = isBareAnswer(text);
+  if (!bare && !(looksLikeLocationPhrase(text) && !params.hasLocation)) {
+    return null;
+  }
 
   // Name is checked first, and geocoding is not used to decide between the
   // two, because a personal name frequently IS a precise geocoder hit:
@@ -102,7 +138,7 @@ export async function resolvePendingReportInput(params: {
   // What actually separates them is the wording itself: a location the
   // citizen types carries a place word ("iilm university", "sector 62",
   // "near city hospital") or a digit, and a name doesn't.
-  if (!params.hasName && looksLikeBareName(text)) {
+  if (bare && !params.hasName && looksLikeBareName(text)) {
     return { kind: "name", name: text };
   }
 

@@ -68,11 +68,49 @@ export interface GeocodedLocation {
   specificity: GeocodeSpecificity;
 }
 
-function googleSpecificity(types: string[]): GeocodeSpecificity {
+// How wide the geocoder's own viewport is, in kilometres. This is the honest
+// measure of "how vague was that query" — the type list is not. "Prayas ke
+// ghar ke pas, Uttar Pradesh, Delhi" comes back typed
+// ["colloquial_area","political"], which matches neither the country nor the
+// locality test below, so it used to be graded `precise` — while spanning
+// 365 x 289 km. A report pinned anywhere in that box is useless.
+interface GoogleViewport {
+  northeast: { lat: number; lng: number };
+  southwest: { lat: number; lng: number };
+}
+
+function viewportSpanKm(viewport: GoogleViewport | undefined): number | null {
+  if (!viewport) return null;
+  const { northeast: ne, southwest: sw } = viewport;
+  const latKm = Math.abs(ne.lat - sw.lat) * 111;
+  const lngKm =
+    Math.abs(ne.lng - sw.lng) * 111 * Math.cos((ne.lat * Math.PI) / 180);
+  return Math.max(latKm, lngKm);
+}
+
+// A street or landmark is well under a kilometre; a town is a few km. Past
+// ~12 km the citizen has named a region, not a place a crew can be sent to.
+const LOCALITY_MAX_KM = 12;
+const COARSE_MIN_KM = 60;
+
+function googleSpecificity(
+  types: string[],
+  viewport?: GoogleViewport
+): GeocodeSpecificity {
   if (types.includes("country")) return "coarse";
+
+  const span = viewportSpanKm(viewport);
+  if (span !== null) {
+    if (span >= COARSE_MIN_KM) return "coarse";
+    if (span > LOCALITY_MAX_KM) return "locality";
+  }
+
   if (
     types.includes("locality") ||
-    types.some((t) => t.startsWith("administrative_area_level_"))
+    types.some((t) => t.startsWith("administrative_area_level_")) ||
+    // A "colloquial area" is a nickname for a region ("NCR", "Tricity") and
+    // is never a reportable spot.
+    types.includes("colloquial_area")
   ) {
     return "locality";
   }
@@ -99,7 +137,7 @@ async function forwardGeocodeGoogle(
       lat: result.geometry.location.lat,
       lng: result.geometry.location.lng,
       formattedAddress: result.formatted_address,
-      specificity: googleSpecificity(result.types ?? []),
+      specificity: googleSpecificity(result.types ?? [], result.geometry?.viewport),
     };
   } catch {
     return null;
