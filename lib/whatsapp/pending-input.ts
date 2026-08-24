@@ -96,6 +96,21 @@ export function looksLikeLocationPhrase(text: string): boolean {
   return normalized.some((w) => PLACE_WORDS.has(w)) || /\d/.test(trimmed);
 }
 
+// True when the message names a civic problem rather than a place.
+//
+// The geocoder is country-biased and answers almost anything: "big pothole"
+// and "garbage" both return a confident hit somewhere in India. A bare answer
+// skips the looksLikeLocationPhrase gate above, so without this a citizen
+// describing the problem had that description silently pinned as the report's
+// location -- and the photo then belonged to a spot they never named.
+export function containsIssueWord(text: string): boolean {
+  return text
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.toLowerCase().replace(/[^a-z0-9ऀ-ॿ]/g, ""))
+    .some((w) => ISSUE_WORDS.has(w));
+}
+
 export function looksLikeBareName(text: string): boolean {
   const trimmed = text.trim();
   if (!isBareAnswer(trimmed) || !NAME_SHAPE_RE.test(trimmed)) return false;
@@ -142,7 +157,10 @@ export async function resolvePendingReportInput(params: {
     return { kind: "name", name: text };
   }
 
-  if (!params.hasLocation) {
+  // Never geocode a description of the problem. looksLikeLocationPhrase
+  // already refuses these, but a short message reaches here as a `bare`
+  // answer without ever passing through it.
+  if (!params.hasLocation && !containsIssueWord(text)) {
     const geocoded = await forwardGeocode(text);
     // A bare "locality" is only trusted once the name is on file, since a
     // country-biased search also fuzzy-matches names onto towns ("deepak"

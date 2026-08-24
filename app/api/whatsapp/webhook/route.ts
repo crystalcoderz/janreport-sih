@@ -24,7 +24,11 @@ import {
   clearReportSession,
 } from "@/lib/whatsapp/report";
 import { extractStatedName } from "@/lib/whatsapp/name-detection";
-import { extractEmail, isEmailDecline } from "@/lib/whatsapp/email-detection";
+import {
+  extractEmail,
+  isEmailDecline,
+  claimsOwnEmail,
+} from "@/lib/whatsapp/email-detection";
 import { sendEmail } from "@/lib/email/client";
 import { reportFiledEmail } from "@/lib/email/templates";
 import { sendMunicipalComplaint } from "@/lib/email/municipal";
@@ -678,12 +682,15 @@ async function handleMessage(message: WhatsAppMessage) {
           sessionAdvanced = true;
         }
 
-        // An address anywhere in the message is unambiguous, so take it
-        // without waiting to be asked. A decline only counts as an answer
-        // when the bot is actually waiting on the email, otherwise a bare
-        // "no" earlier in the conversation would silently opt them out.
+        // Only an address the citizen presents as their own is taken
+        // unasked. Any address at all used to be captured, but civic reports
+        // routinely quote somebody else's -- "the contractor is at
+        // works@example.com" -- and storing that as the reporter's silently
+        // redirected their confirmation, and every later status update, to a
+        // stranger. An address given in reply to the actual question is
+        // handled below, where no anchor is needed.
         const statedEmail = extractEmail(body);
-        if (statedEmail) {
+        if (statedEmail && claimsOwnEmail(body)) {
           await saveReporterEmailToSession(phone, statedEmail);
           sessionAdvanced = true;
         }
@@ -755,9 +762,11 @@ async function handleMessage(message: WhatsAppMessage) {
     // citizen who replied "ok sure" or "haan" was left with a finished report
     // that never filed, having just been told it would be filed either way.
     if (freeText && session.emailAsked) {
-      if (!extractEmail(freeText)) {
-        await saveReporterEmailToSession(phone, null);
-      }
+      // Saved here rather than relying on the capture above, which only runs
+      // for `text` messages: an address dictated in a voice note was detected
+      // (so the question was marked answered) but never stored, leaving the
+      // citizen expecting mail that could never be sent.
+      await saveReporterEmailToSession(phone, extractEmail(freeText));
       session = { ...session, emailAsked: false, emailSettled: true };
       sessionAdvanced = true;
     } else if (

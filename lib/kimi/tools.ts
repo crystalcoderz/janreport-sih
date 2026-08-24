@@ -382,6 +382,20 @@ async function fileNewReport(ctx: ToolContext, args: { forceNew?: boolean }) {
       return { filed: false, reason: "error", message: result.message };
     case "filed":
       return { filed: true, issue: result.issue };
+    // The junk screen rejecting the photo is an ordinary outcome, not an
+    // error. Without this arm the function fell off the end and returned
+    // undefined, which JSON.stringify renders as nothing at all -- so the
+    // tool message had no content and the whole turn failed, leaving the
+    // citizen with silence instead of "that photo doesn't show a civic issue".
+    case "not_an_issue":
+      return { filed: false, reason: "not_a_civic_issue", description: result.description };
+    default: {
+      // Exhaustiveness guard: a new FinalizeReportResult variant becomes a
+      // type error here rather than another silent undefined.
+      const unreachable: never = result;
+      console.error("fileNewReport: unhandled finalize result", unreachable);
+      return { filed: false, reason: "error", message: "Could not file the report." };
+    }
   }
 }
 

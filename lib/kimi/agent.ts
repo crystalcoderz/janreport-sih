@@ -89,7 +89,10 @@ export async function runKimiAgent(
       messages.push({
         role: "tool",
         tool_call_id: call.id,
-        content: JSON.stringify(result),
+        // `?? null` so a tool that returns undefined yields "null" rather than
+        // the literal undefined, which is not valid message content and fails
+        // the entire turn.
+        content: JSON.stringify(result ?? null),
       });
     }
   }

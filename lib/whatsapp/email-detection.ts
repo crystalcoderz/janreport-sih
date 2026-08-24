@@ -37,6 +37,24 @@ function normalize(raw: string): string {
   return raw.trim().toLowerCase().replace(/[.,;:]+$/, "");
 }
 
+// Phrases that make an address the citizen's OWN, rather than one they happen
+// to mention. Civic reports do quote third-party addresses -- "the contractor
+// is at works@example.com", "I already wrote to pwd@example.gov.in" -- and
+// storing one of those as the reporter's means their confirmation, and every
+// status update after it, is emailed to a stranger along with the report.
+const OWN_EMAIL_ANCHOR_RE =
+  /\b(?:my|mera|meri)\s+(?:e-?mail|mail|id)\b|\b(?:e-?mail|mail)\s+(?:me|mujhe)\b|\bmail\s+id\b|\bsend\s+(?:it\s+)?to\s+me\b/i;
+
+/**
+ * True when the message presents the address as the sender's own.
+ *
+ * Used to decide whether to capture an address nobody asked for. When the bot
+ * has actually asked, the reply is the answer and this check is unnecessary.
+ */
+export function claimsOwnEmail(text: string): boolean {
+  return OWN_EMAIL_ANCHOR_RE.test(text);
+}
+
 /** True when the citizen is saying they'd rather not give an address. */
 export function isEmailDecline(text: string): boolean {
   return DECLINE_RE.test(text.trim());

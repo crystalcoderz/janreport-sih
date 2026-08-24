@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { looksLikeBareName, resolvePendingReportInput } from "@/lib/whatsapp/pending-input";
+import { looksLikeBareName, resolvePendingReportInput, containsIssueWord } from "@/lib/whatsapp/pending-input";
 import { forwardGeocode } from "@/lib/geo";
 
 // Must be vi.mock, not vi.spyOn: pending-input.ts imports forwardGeocode
@@ -137,5 +137,21 @@ describe("resolvePendingReportInput", () => {
       })
     ).toBeNull();
     expect(mockGeocode).not.toHaveBeenCalled();
+  });
+});
+
+describe("containsIssueWord", () => {
+  it("recognises a description of the problem", () => {
+    // These used to be handed to the geocoder as a bare answer and pinned as
+    // the report's location.
+    for (const t of ["big pothole", "garbage", "street light not working", "open manhole"]) {
+      expect(containsIssueWord(t)).toBe(true);
+    }
+  });
+
+  it("leaves real places alone", () => {
+    for (const t of ["sector 62 noida", "iilm university", "gomti nagar", "pari chowk"]) {
+      expect(containsIssueWord(t)).toBe(false);
+    }
   });
 });
