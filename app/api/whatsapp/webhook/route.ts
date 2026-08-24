@@ -267,7 +267,10 @@ async function fileCompletedReport(phone: string): Promise<boolean> {
         `*Severity:* ${issue.severity}\n` +
         `*Department:* ${issue.department ?? "Being assigned"}\n` +
         `*Location:* ${issue.mapsLink}\n` +
-        `*Report ID:* ${issue.id.slice(0, 8)}\n\n` +
+        // The reference, not the uuid slice: this is the id the municipal
+        // complaint is filed under, so it is the one a citizen can quote and
+        // the one an office will quote back.
+        `*Report ID:* ${issue.reference ?? issue.id.slice(0, 8).toUpperCase()}\n\n` +
         (emailedTo
           ? `
 📧 A copy is on its way to ${emailedTo}.`
@@ -519,7 +522,7 @@ Thanks, <reporterName> — here are the details:
 *Severity:* <severity>
 *Department:* <department>
 *Location:* <mapsLink>
-*Report ID:* <first 8 characters of the id>
+*Report ID:* <the reference, e.g. JR-2608-9044>
 
 You'll receive updates as the status changes.
 

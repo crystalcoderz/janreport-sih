@@ -125,12 +125,39 @@ create table issues (
   -- Optional. Citizens who give one get a filed-report confirmation and an
   -- email on every status change; those who do not still report normally.
   reporter_email text,
+  -- Human-quotable tracking id, JR-YYMM-NNNN, assigned by the trigger below.
+  -- This is the id a citizen is told, the id the municipal complaint is filed
+  -- under, and the id an office quotes when it replies -- so the inbound
+  -- webhook can match a reply back to the report that caused it. Nullable in
+  -- the column definition only because the trigger fills it in; every row has
+  -- one. Unique so a reply can never resolve to two reports.
+  reference text unique,
   acknowledgement_sent_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index issues_assigned_team_id_idx on issues (assigned_team_id);
+
+-- Sequence and trigger behind issues.reference. The month prefix is Kolkata
+-- local time so the id matches the day a citizen believes they reported, and
+-- the counter is a plain sequence rather than a per-month reset: gaps are
+-- harmless and a reset would need locking to stay unique.
+create sequence if not exists issue_reference_seq;
+
+create or replace function assign_issue_reference()
+returns trigger as $$
+begin
+  if new.reference is null then
+    new.reference := 'JR-' || to_char(now() at time zone 'Asia/Kolkata', 'YYMM')
+                   || '-' || lpad(nextval('issue_reference_seq')::text, 4, '0');
+  end if;
+  return new;
+end $$ language plpgsql;
+
+create trigger issues_assign_reference
+  before insert on issues
+  for each row execute function assign_issue_reference();
 
 create table issue_upvotes (
   issue_id uuid not null references issues (id) on delete cascade,
@@ -147,6 +174,26 @@ create table issue_status_history (
   changed_by uuid references profiles (id),
   changed_at timestamptz not null default now()
 );
+
+-- One row per municipal reply already handled by the inbound webhook.
+--
+-- Resend redelivers on any non-2xx, and the webhook deliberately answers 502
+-- when it cannot fetch a message body, so the same reply genuinely does arrive
+-- more than once. The primary key is the claim: the handler inserts before
+-- doing any work and treats a unique violation as "another delivery got here
+-- first", which stops a citizen being notified twice about one reply.
+--
+-- No policies and no grants: only the service role touches this table.
+create table inbound_emails (
+  email_id text primary key,
+  reference text not null,
+  received_at timestamptz not null default now()
+);
+
+create index inbound_emails_reference_idx on inbound_emails (reference);
+
+alter table inbound_emails enable row level security;
+revoke all on inbound_emails from anon, authenticated;
 
 -- Geofenced alerts: one row per (issue, nearby resident) fan-out, created
 -- by the trigger below. Citizens read/mark-read their own rows only;

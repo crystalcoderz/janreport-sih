@@ -39,9 +39,20 @@ export function computeCityStats(
     ? (issues.reduce((s, i) => s + i.ai_severity, 0) / total).toFixed(1)
     : "0";
 
-  const resolvedAtByIssue = new Map(
-    resolvedHistory.map((h) => [h.issue_id, h.changed_at])
-  );
+  // Keep the EARLIEST resolved row per issue, not whichever happens to come
+  // last. An issue can accumulate several rows carrying status 'resolved' —
+  // reopening and resolving again, or the inbound webhook recording a
+  // municipal reply against an already-resolved report without changing its
+  // status. Building the map straight from the array would let one of those
+  // later rows overwrite the real resolution time and silently inflate every
+  // department's average.
+  const resolvedAtByIssue = new Map<string, string>();
+  for (const h of resolvedHistory) {
+    const existing = resolvedAtByIssue.get(h.issue_id);
+    if (!existing || new Date(h.changed_at).getTime() < new Date(existing).getTime()) {
+      resolvedAtByIssue.set(h.issue_id, h.changed_at);
+    }
+  }
 
   const perDepartment: DepartmentStat[] = departments.map((dept) => {
     const deptIssues = issues.filter((i) => i.department_id === dept.id);

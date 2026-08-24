@@ -200,6 +200,22 @@ export interface Database {
           }
         ];
       };
+      // Claim rows for municipal replies already handled by the inbound
+      // webhook, keyed by the Resend message id so a redelivery is a no-op.
+      inbound_emails: {
+        Row: {
+          email_id: string;
+          reference: string;
+          received_at: string;
+        };
+        Insert: {
+          email_id: string;
+          reference: string;
+          received_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["inbound_emails"]["Insert"]>;
+        Relationships: [];
+      };
       issue_status_history: {
         Row: {
           id: string;
