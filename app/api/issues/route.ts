@@ -224,6 +224,7 @@ export async function POST(request: NextRequest) {
     const mail = reportFiledEmail(
       {
         id: issue.id,
+        reference: issue.reference ?? issue.id.slice(0, 8).toUpperCase(),
         title: issue.title,
         description: issue.description,
         category: CATEGORY_LABELS[issue.ai_category as IssueCategory] ?? issue.ai_category,
@@ -249,6 +250,7 @@ export async function POST(request: NextRequest) {
   await sendMunicipalComplaint({
     data: {
       id: issue.id,
+      reference: issue.reference ?? issue.id.slice(0, 8).toUpperCase(),
       title: issue.title,
       description: issue.description,
       category: CATEGORY_LABELS[issue.ai_category as IssueCategory] ?? issue.ai_category,

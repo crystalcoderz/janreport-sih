@@ -102,6 +102,7 @@ export interface Database {
           assigned_at: string | null;
           reporter_name: string | null;
           reporter_email: string | null;
+          reference: string | null;
           acknowledgement_sent_at: string | null;
           created_at: string;
           updated_at: string;
@@ -133,6 +134,7 @@ export interface Database {
           assigned_at?: string | null;
           reporter_name?: string | null;
           reporter_email?: string | null;
+          reference?: string | null;
           acknowledgement_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;

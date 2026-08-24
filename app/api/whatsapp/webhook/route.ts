@@ -214,6 +214,7 @@ async function fileCompletedReport(phone: string): Promise<boolean> {
       const mail = reportFiledEmail(
         {
           id: issue.id,
+          reference: issue.reference,
           title: issue.title,
           description: issue.description,
           category: issue.category,
@@ -240,6 +241,7 @@ async function fileCompletedReport(phone: string): Promise<boolean> {
     await sendMunicipalComplaint({
       data: {
         id: issue.id,
+        reference: issue.reference ?? issue.id.slice(0, 8).toUpperCase(),
         title: issue.title,
         description: issue.description,
         category: issue.category,

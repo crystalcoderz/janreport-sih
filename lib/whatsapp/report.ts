@@ -283,6 +283,7 @@ export type FinalizeReportResult =
         lng: number;
         photoUrl: string;
         reporterEmail: string | null;
+        reference: string;
       };
     }
   // The photo does not show a civic issue at all. Kept distinct from
@@ -498,6 +499,7 @@ export async function finalizeReportIfReady(
       lng: issue.lng,
       photoUrl: publicUrl,
       reporterEmail: isRealEmail(session.reporter_email) ? session.reporter_email : null,
+      reference: issue.reference ?? issue.id.slice(0, 8).toUpperCase(),
     },
   };
 }

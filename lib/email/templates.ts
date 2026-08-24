@@ -48,6 +48,7 @@ function severityInk(score: number): string {
 
 export interface IssueEmailData {
   id: string;
+  reference: string;
   title: string;
   description?: string | null;
   category: string;
@@ -213,7 +214,7 @@ function detailBlock(issue: IssueEmailData): string {
       ${field(
         "Reference",
         `<span style="font-family:${MONO};font-size:14px;color:${INK};letter-spacing:0.02em;">${esc(
-          issue.id.slice(0, 8).toUpperCase()
+          issue.reference
         )}</span>`
       )}
     </table>
@@ -237,11 +238,9 @@ function quote(label: string, text: string): string {
 /** Sent the moment a report is filed. */
 export function reportFiledEmail(issue: IssueEmailData, viewUrl?: string) {
   return {
-    subject: `Report ${issue.id.slice(0, 8).toUpperCase()} received — ${issue.title}`,
+    subject: `Report ${issue.reference} received — ${issue.title}`,
     html: shell({
-      preheaderText: `Logged and routed to ${issue.department ?? "a department"}. Reference ${issue.id
-        .slice(0, 8)
-        .toUpperCase()}.`,
+      preheaderText: `Logged and routed to ${issue.department ?? "a department"}. Reference ${issue.reference}.`,
       eyebrowText: "Report received",
       eyebrowColor: MUTED,
       headline: issue.title,
@@ -262,7 +261,7 @@ export function reportFiledEmail(issue: IssueEmailData, viewUrl?: string) {
       `Department: ${issue.department ?? "Being assigned"}`,
       `Location:   ${issue.address ?? mapsLink(issue.lat, issue.lng)}`,
       `Filed:      ${formatDate(issue.createdAt)}`,
-      `Reference:  ${issue.id.slice(0, 8).toUpperCase()}`,
+      `Reference:  ${issue.reference}`,
     ].join("\n"),
   };
 }
@@ -292,7 +291,7 @@ export function statusChangedEmail(
       `${label} — ${issue.title}`,
       ``,
       note ? `Officer's note: ${note}` : ``,
-      `Reference: ${issue.id.slice(0, 8).toUpperCase()}`,
+      `Reference: ${issue.reference}`,
     ]
       .filter(Boolean)
       .join("\n"),
@@ -374,7 +373,7 @@ export function resolvedEmail(
       `Automated check: ${verdictLabel}`,
       verdict.reason ?? "",
       ``,
-      `Reference: ${issue.id.slice(0, 8).toUpperCase()}`,
+      `Reference: ${issue.reference}`,
     ]
       .filter(Boolean)
       .join("\n"),

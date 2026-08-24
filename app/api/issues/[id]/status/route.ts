@@ -131,6 +131,7 @@ export async function PATCH(
     try {
       const data = {
         id: verified.id,
+        reference: verified.reference ?? verified.id.slice(0, 8).toUpperCase(),
         title: verified.title,
         description: verified.description,
         category: CATEGORY_LABELS[verified.ai_category as IssueCategory] ?? verified.ai_category,

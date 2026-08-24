@@ -24,6 +24,8 @@ const MONO = "ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace";
 
 export interface MunicipalComplaintData {
   id: string;
+  /** Human-quotable tracking id, e.g. JR-2608-0042. */
+  reference: string;
   title: string;
   description?: string | null;
   category: string;
@@ -79,7 +81,7 @@ export function municipalComplaintEmail(
   office: NearbyOffice | null,
   viewUrl?: string
 ) {
-  const ref = d.id.slice(0, 8).toUpperCase();
+  const ref = d.reference;
   const slaHours = slaHoursFor(d.severity);
   const slaText =
     slaHours <= 24
@@ -170,8 +172,9 @@ export function municipalComplaintEmail(
    }
 
    <tr><td style="padding:24px 34px 26px;font:400 14px/21px ${SANS};color:${BODY};">
-     You may reply to this email to record action taken; the response will be
-     attached to reference ${esc(ref)} and relayed to the complainant.
+     Please reply to this email to record action taken. Your reply is attached
+     to reference <strong style="color:${INK};">${esc(ref)}</strong> automatically and
+     relayed to the complainant.
      <div style="padding-top:14px;color:${MUTED};">Respectfully,<br /><strong style="color:${INK};">JanReport</strong><br />
      <span style="font-size:13px;">On behalf of the complainant named above</span></div>
    </td></tr>
@@ -251,7 +254,13 @@ export async function sendMunicipalComplaint(params: {
   );
 
   const mail = municipalComplaintEmail(params.data, office, params.viewUrl);
-  const res = await sendEmail({ to, ...mail });
+  // Plus-addressing carries the reference through the reply, so an answer can
+  // be matched to its report even if the clerk rewrites the subject line —
+  // which they routinely do. The subject and body carry it too, as fallbacks.
+  const inbox = process.env.INBOUND_EMAIL || "reports@janreport.xyz";
+  const [local, domain] = inbox.split("@");
+  const replyTo = domain ? `${local}+${params.data.reference}@${domain}` : inbox;
+  const res = await sendEmail({ to, replyTo, ...mail });
   if (!res.ok) {
     console.error("Failed to send the municipal complaint", res.error);
     return { sent: false, reason: res.error };
