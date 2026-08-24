@@ -198,23 +198,25 @@ export function municipalComplaintEmail(
     `Date: ${formatDate(d.createdAt)}`,
     ``,
     `To: ${addressee}`,
-    office?.address ?? "",
+    ...(office?.address ? [office.address] : []),
     ``,
     `Subject: ${d.title}`,
     ``,
     `Nature:        ${d.category}`,
     `Severity:      ${d.severityLabel} (${d.severity}/10)`,
-    `Location:      ${d.address ?? ""}`,
+    ...(d.address ? [`Location:      ${d.address}`] : []),
     `Coordinates:   ${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}`,
     `Map:           https://www.google.com/maps?q=${d.lat},${d.lng}`,
     `Complainant:   ${d.reporterName ?? "Withheld"}`,
-    d.reporterPhone ? `Contact:       ${d.reporterPhone}` : "",
+    ...(d.reporterPhone ? [`Contact:       ${d.reporterPhone}`] : []),
     `Response:      Within ${slaText}`,
     ``,
     `Generated from a citizen submission via JanReport.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    // No filter(Boolean): the empty strings above are paragraph breaks, and
+    // stripping them ran the whole plain-text part together into one block.
+    // Optional lines are spread in instead, so an absent address no longer
+    // prints a labelled field with nothing after it.
+  ].join("\n");
 
   return {
     subject: `Civic complaint ${ref} — ${d.category} at ${d.address?.split(",")[0] ?? "reported location"}`,

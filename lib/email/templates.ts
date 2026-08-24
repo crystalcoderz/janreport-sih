@@ -290,11 +290,9 @@ export function statusChangedEmail(
     text: [
       `${label} — ${issue.title}`,
       ``,
-      note ? `Officer's note: ${note}` : ``,
+      ...(note ? [`Officer's note: ${note}`, ``] : []),
       `Reference: ${issue.reference}`,
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    ].join("\n"),
   };
 }
 
@@ -371,11 +369,9 @@ export function resolvedEmail(
       `Resolved — ${issue.title}`,
       ``,
       `Automated check: ${verdictLabel}`,
-      verdict.reason ?? "",
+      ...(verdict.reason ? [verdict.reason] : []),
       ``,
       `Reference: ${issue.reference}`,
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    ].join("\n"),
   };
 }
