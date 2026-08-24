@@ -27,6 +27,7 @@ import { extractStatedName } from "@/lib/whatsapp/name-detection";
 import { extractEmail, isEmailDecline } from "@/lib/whatsapp/email-detection";
 import { sendEmail } from "@/lib/email/client";
 import { reportFiledEmail } from "@/lib/email/templates";
+import { sendMunicipalComplaint } from "@/lib/email/municipal";
 import { isLinkRequest } from "@/lib/whatsapp/link-request";
 import { isCancelRequest } from "@/lib/whatsapp/cancel-request";
 import { resolvePendingReportInput } from "@/lib/whatsapp/pending-input";
@@ -233,6 +234,28 @@ async function fileCompletedReport(phone: string): Promise<boolean> {
       if (sent.ok) emailedTo = issue.reporterEmail;
       else console.error("Failed to email the filed-report confirmation", sent.error);
     }
+
+    // Formal intimation to the municipal body. A no-op unless a recipient has
+    // been configured, so this can never delay or break a citizen's filing.
+    await sendMunicipalComplaint({
+      data: {
+        id: issue.id,
+        title: issue.title,
+        description: issue.description,
+        category: issue.category,
+        severity: issue.severityScore,
+        severityLabel: issue.severity,
+        department: issue.department,
+        address: issue.address,
+        lat: issue.lat,
+        lng: issue.lng,
+        photoUrl: issue.photoUrl,
+        reporterName: issue.reporterName,
+        reporterPhone: phone,
+        createdAt: new Date().toISOString(),
+      },
+      viewUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${issue.id}`,
+    }).catch((err) => console.error("Municipal complaint send threw", err));
 
     await sendWhatsAppText(
       phone,

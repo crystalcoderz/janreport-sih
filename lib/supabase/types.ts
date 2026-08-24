@@ -63,11 +63,13 @@ export interface Database {
           id: string;
           name: string;
           category_keys: string[];
+          contact_email: string | null;
         };
         Insert: {
           id?: string;
           name: string;
           category_keys?: string[];
+          contact_email?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["departments"]["Insert"]>;
         Relationships: [];

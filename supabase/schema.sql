@@ -43,7 +43,10 @@ create type resolution_verdict as enum ('verified', 'not_fixed', 'unclear');
 create table departments (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
-  category_keys text[] not null default '{}'
+  category_keys text[] not null default '{}',
+  -- Where this department's complaint intimations are emailed. Null means
+  -- fall back to MUNICIPAL_EMAIL, and with neither set nothing is sent.
+  contact_email text
 );
 
 create table profiles (

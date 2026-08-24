@@ -4,6 +4,7 @@ import { classifyIssuePhoto, rejectionFor } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
 import { sendEmail } from "@/lib/email/client";
 import { reportFiledEmail } from "@/lib/email/templates";
+import { sendMunicipalComplaint } from "@/lib/email/municipal";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 import {
@@ -168,7 +169,7 @@ export async function POST(request: NextRequest) {
     reverseGeocode(lat, lng),
     supabase
       .from("departments")
-      .select("id")
+      .select("id, contact_email")
       .contains("category_keys", [classification.category])
       .limit(1)
       .maybeSingle(),
@@ -242,6 +243,29 @@ export async function POST(request: NextRequest) {
     const sent = await sendEmail({ to: reporterEmail, ...mail });
     if (!sent.ok) console.error("Failed to email the filed-report confirmation", sent.error);
   }
+
+  // Formal intimation to the municipal body. Only goes anywhere if a
+  // recipient has been configured — see municipalRecipient().
+  await sendMunicipalComplaint({
+    data: {
+      id: issue.id,
+      title: issue.title,
+      description: issue.description,
+      category: CATEGORY_LABELS[issue.ai_category as IssueCategory] ?? issue.ai_category,
+      severity: issue.ai_severity,
+      severityLabel: issue.ai_severity_label,
+      department: issue.departments?.name ?? null,
+      address: issue.address,
+      lat: issue.lat,
+      lng: issue.lng,
+      photoUrl: issue.photo_url,
+      reporterName: issue.reporter_name,
+      reporterPhone: null,
+      createdAt: issue.created_at,
+    },
+    departmentEmail: departmentResult.data?.contact_email,
+    viewUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${issue.id}`,
+  }).catch((err) => console.error("Municipal complaint send threw", err));
 
   return NextResponse.json({ issue }, { status: 201 });
 }
