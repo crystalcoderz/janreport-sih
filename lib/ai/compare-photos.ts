@@ -1,5 +1,5 @@
 import { Type } from "@google/genai";
-import { getAiClient, AI_MODEL } from "@/lib/ai/client";
+import { getAiClient, AI_MODEL, AI_TIMEOUT_MS } from "@/lib/ai/client";
 import { withAiRetry } from "@/lib/ai/retry";
 
 // Candidate photos come from our own storage (Supabase/R2 public URLs), but
@@ -100,6 +100,7 @@ export async function comparePhotosForDuplicate(params: {
         config: {
           responseMimeType: "application/json",
           responseSchema: RESPONSE_SCHEMA,
+          httpOptions: { timeout: AI_TIMEOUT_MS },
         },
       });
 

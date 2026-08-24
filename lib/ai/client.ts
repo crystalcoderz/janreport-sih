@@ -17,11 +17,33 @@ import { GoogleGenAI } from "@google/genai";
 // a local checkout that only has GEMINI_API_KEY) keeps working rather than
 // failing at import time.
 
-// The "-latest" alias tracks the current Flash model, so this does not rot
-// the way a pinned version does (gemini-2.5-flash is already 404 for new
-// API keys). Vertex exposes a different set of model ids than the Gemini
-// API, so this may need overriding per-environment.
-export const AI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+// Which backend the current environment resolves to. Only for logging and
+// diagnostics — callers never branch on this.
+export function isVertexConfigured(): boolean {
+  return Boolean(
+    process.env.GOOGLE_CLOUD_PROJECT && process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+  );
+}
+
+// The model id has to differ per backend, because the two backends do not
+// expose the same ids and — more importantly — do not share a quota.
+//
+// On Vertex, "gemini-flash-latest" works and tracks the current Flash model,
+// so it does not rot the way a pinned version does. On the API key it
+// resolves fine but answers 429 RESOURCE_EXHAUSTED: the AI Studio free tier
+// for that alias is spent. Inheriting GEMINI_MODEL onto the fallback would
+// therefore give us a fallback that is guaranteed to fail at the exact moment
+// it is needed, so the fallback picks its own default instead.
+export const AI_MODEL = isVertexConfigured()
+  ? process.env.GEMINI_MODEL || "gemini-flash-latest"
+  : process.env.GEMINI_API_MODEL || "gemini-3.5-flash";
+
+// A stalled request is worse than a failed one: withAiRetry only retries on a
+// thrown error, so without a deadline a hung upstream never becomes a retry
+// and never becomes a user-visible failure — the citizen just waits in a
+// WhatsApp chat forever. Bounded per attempt, not per call, so the retry
+// wrapper still gets its chances.
+export const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 30_000;
 
 let client: GoogleGenAI | null = null;
 
@@ -57,12 +79,4 @@ function buildClient(): GoogleGenAI {
 export function getAiClient(): GoogleGenAI {
   if (!client) client = buildClient();
   return client;
-}
-
-// Which backend the current environment resolves to. Only for logging and
-// diagnostics — callers never branch on this.
-export function isVertexConfigured(): boolean {
-  return Boolean(
-    process.env.GOOGLE_CLOUD_PROJECT && process.env.GOOGLE_SERVICE_ACCOUNT_JSON
-  );
 }
