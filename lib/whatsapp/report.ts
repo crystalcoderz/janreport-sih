@@ -140,15 +140,31 @@ export async function saveReporterNameToSession(phone: string, name: string): Pr
 // sentinel for a decline is what stops the bot asking again on every
 // subsequent turn of the same report.
 export const EMAIL_DECLINED = "-";
+// Written the moment the bot asks. Without it the only way out of the question
+// was a recognised decline word, so "ok sure" or "haan" left a finished report
+// unfiled forever — while the message itself promised it would be filed either
+// way. Also what stops the question being asked twice.
+export const EMAIL_ASKED = "?";
+
+function isRealEmail(value: string | null): boolean {
+  return Boolean(value) && value !== EMAIL_DECLINED && value !== EMAIL_ASKED;
+}
 
 export async function saveReporterEmailToSession(
   phone: string,
   email: string | null
 ): Promise<void> {
+  // Sentinels pass through untouched; only a real address is normalised.
+  const value =
+    email === EMAIL_ASKED || email === EMAIL_DECLINED
+      ? email
+      : email
+        ? email.trim().slice(0, 200).toLowerCase()
+        : EMAIL_DECLINED;
   const supabase = createServiceRoleClient();
   await supabase.from("whatsapp_report_sessions").upsert({
     phone,
-    reporter_email: email ? email.trim().slice(0, 200).toLowerCase() : EMAIL_DECLINED,
+    reporter_email: value,
     updated_at: new Date().toISOString(),
   });
 }
@@ -192,8 +208,10 @@ export async function getReportSessionState(phone: string): Promise<{
   hasLocation: boolean;
   hasNote: boolean;
   hasName: boolean;
-  /** True once they have given an address OR declined — either way, stop asking. */
+  /** True once asked, answered or declined — either way, stop asking. */
   emailSettled: boolean;
+  /** The question is outstanding: asked, not yet answered. */
+  emailAsked: boolean;
 }> {
   const supabase = createServiceRoleClient();
   const { data: session } = await supabase
@@ -216,6 +234,7 @@ export async function getReportSessionState(phone: string): Promise<{
       hasNote: false,
       hasName: false,
       emailSettled: false,
+      emailAsked: false,
     };
   }
 
@@ -225,6 +244,7 @@ export async function getReportSessionState(phone: string): Promise<{
     hasNote: Boolean(session.note),
     hasName: Boolean(session.reporter_name),
     emailSettled: Boolean(session.reporter_email),
+    emailAsked: session.reporter_email === EMAIL_ASKED,
   };
 }
 
@@ -442,10 +462,7 @@ export async function finalizeReportIfReady(
       department_id: departmentResult.data?.id ?? null,
       reporter_name: session.reporter_name,
       // EMAIL_DECLINED is a sentinel, not an address — never store it.
-      reporter_email:
-        session.reporter_email && session.reporter_email !== EMAIL_DECLINED
-          ? session.reporter_email
-          : null,
+      reporter_email: isRealEmail(session.reporter_email) ? session.reporter_email : null,
     })
     .select("*, departments(name)")
     .single();
@@ -480,10 +497,7 @@ export async function finalizeReportIfReady(
       lat: issue.lat,
       lng: issue.lng,
       photoUrl: publicUrl,
-      reporterEmail:
-        session.reporter_email && session.reporter_email !== EMAIL_DECLINED
-          ? session.reporter_email
-          : null,
+      reporterEmail: isRealEmail(session.reporter_email) ? session.reporter_email : null,
     },
   };
 }

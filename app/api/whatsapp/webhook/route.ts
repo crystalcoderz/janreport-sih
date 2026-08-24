@@ -17,6 +17,7 @@ import {
   saveNoteToSession,
   saveReporterNameToSession,
   saveReporterEmailToSession,
+  EMAIL_ASKED,
   getReportSessionState,
   clearReportSessionIfStale,
   finalizeReportIfReady,
@@ -124,8 +125,16 @@ export async function POST(request: NextRequest) {
   // message-id claim so any retry that still slips through is a no-op.
   after(async () => {
     for (const message of messages) {
-      if (!(await claimMessage(message.id))) continue;
-      await handleMessage(message);
+      // Per-message, because handleMessage's own try/catch does not cover
+      // everything that can throw before it: a delivery missing `from` threw
+      // inside normalizePhone, escaped this loop, and silently dropped every
+      // remaining message in the same batch.
+      try {
+        if (!(await claimMessage(message.id))) continue;
+        await handleMessage(message);
+      } catch (err) {
+        console.error("Failed to handle a message in the batch", message?.id, err);
+      }
     }
   });
 
@@ -710,9 +719,22 @@ async function handleMessage(message: WhatsAppMessage) {
 
     let session = initialSession;
 
-    // "no" / "skip" / "nahi" only means "no email" when that is the question
-    // on the table: the report is otherwise complete and we have asked.
-    if (
+    // The bot asked for an email and this is the reply. Whatever it says, the
+    // question is now answered — an address was already captured above by
+    // extractEmail, and anything else means no address.
+    //
+    // Previously only a recognised decline word released the report, so a
+    // citizen who replied "ok sure" or "haan" was left with a finished report
+    // that never filed, having just been told it would be filed either way.
+    if (freeText && session.emailAsked) {
+      if (!extractEmail(freeText)) {
+        await saveReporterEmailToSession(phone, null);
+      }
+      session = { ...session, emailAsked: false, emailSettled: true };
+      sessionAdvanced = true;
+    } else if (
+      // A decline before we have asked still counts, so someone who
+      // volunteers "no email" early is not asked again later.
       freeText &&
       !session.emailSettled &&
       session.hasPhoto &&
@@ -792,6 +814,9 @@ async function handleMessage(message: WhatsAppMessage) {
         phone,
         `📧 Last thing — what's your email address? I'll send you a copy of the report and updates when it's fixed.\n\nReply *skip* if you'd rather not; the report still gets filed either way.`
       );
+      // Record that the question went out, so it is asked exactly once and the
+      // next reply — whatever it is — releases the report.
+      await saveReporterEmailToSession(phone, EMAIL_ASKED);
       return;
     }
 
