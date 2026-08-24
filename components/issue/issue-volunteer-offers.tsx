@@ -51,34 +51,47 @@ export function IssueVolunteerOffers({
 
   async function submit() {
     setSubmitting(true);
-    const supabase = createClient();
-    const { data, error } = await supabase
-      .from("issue_volunteer_offers")
-      .insert({
-        issue_id: issueId,
-        offered_by: userId,
-        volunteer_group_id: groupId === "self" ? null : groupId,
-        note: note.trim() || null,
-      })
-      .select()
-      .single();
-    setSubmitting(false);
+    try {
+      const supabase = createClient();
+      // Upsert, not insert. Withdrawing sets status to 'withdrawn' rather than
+      // deleting the row, and myOffer above ignores withdrawn ones — so the
+      // form correctly comes back, but the row is still there and a plain
+      // insert hit `unique (issue_id, offered_by)` every single time. A
+      // citizen who withdrew once could never offer again, and the error told
+      // them they had already offered, which the UI was simultaneously
+      // denying. Re-offering revives the same row.
+      const { data, error } = await supabase
+        .from("issue_volunteer_offers")
+        .upsert(
+          {
+            issue_id: issueId,
+            offered_by: userId,
+            volunteer_group_id: groupId === "self" ? null : groupId,
+            note: note.trim() || null,
+            status: "offered",
+          },
+          { onConflict: "issue_id,offered_by" }
+        )
+        .select()
+        .single();
 
-    if (error || !data) {
-      toast.error(
-        error?.code === "23505"
-          ? "You've already offered to help with this issue."
-          : "Could not submit your offer. Please try again."
-      );
-      return;
+      if (error || !data) {
+        toast.error("Could not submit your offer. Please try again.");
+        return;
+      }
+      const group = myGroups.find((g) => g.id === groupId);
+      // Drop any previous copy of this row before prepending — reviving a
+      // withdrawn offer returns the same id, and keeping both would render
+      // duplicate React keys.
+      setOffers((prev) => [
+        { ...data, offererName: "You", groupName: group?.name ?? null },
+        ...prev.filter((o) => o.id !== data.id),
+      ]);
+      setNote("");
+      toast.success("Thanks — your offer to help has been posted.");
+    } finally {
+      setSubmitting(false);
     }
-    const group = myGroups.find((g) => g.id === groupId);
-    setOffers((prev) => [
-      { ...data, offererName: "You", groupName: group?.name ?? null },
-      ...prev,
-    ]);
-    setNote("");
-    toast.success("Thanks — your offer to help has been posted.");
   }
 
   async function withdraw(offerId: string) {

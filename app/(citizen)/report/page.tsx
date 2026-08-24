@@ -55,18 +55,18 @@ export default function ReportPage() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [view, setView] = useState<ViewState>({ step: "form" });
-  const speech = useSpeechToText();
+  // Committed when recognition ends, however it ends. Merging only in the
+  // Stop branch below silently threw away anything Chrome ended on its own.
+  const speech = useSpeechToText({
+    onEnd: (text) =>
+      setNote((prev) => (prev ? `${prev} ${text}`.trim() : text)),
+  });
   const { t } = useTranslation();
 
   function toggleVoiceNote() {
     if (speech.listening) {
       speech.stop();
-      if (speech.transcript) {
-        setNote((prev) => (prev ? `${prev} ${speech.transcript}`.trim() : speech.transcript));
-        speech.reset();
-      }
     } else {
-      speech.reset();
       speech.start();
     }
   }

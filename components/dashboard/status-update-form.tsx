@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import type { IssueStatus } from "@/lib/supabase/types";
 import { toast } from "sonner";
+import { downscaleImage } from "@/lib/image-resize";
 import { Sparkles } from "lucide-react";
 
 const STATUS_OPTIONS: { value: IssueStatus; label: string }[] = [
@@ -46,12 +47,14 @@ export function StatusUpdateForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ issueId, targetStatus: status }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}) as { error?: string; note?: string });
       if (!res.ok) {
         toast.error(data.error || "Could not draft a note");
         return;
       }
-      setNote(data.note);
+      setNote(data.note ?? "");
+    } catch {
+      toast.error("Could not reach JanReport. Check your connection and try again.");
     } finally {
       setDrafting(false);
     }
@@ -70,10 +73,15 @@ export function StatusUpdateForm({
           method: "POST",
           body: fd,
         });
-        const uploadData = await uploadRes.json();
+        // Parsed defensively and after the status check: a raw camera JPEG can
+        // exceed the platform's request-body limit, and the 413 that comes
+        // back is an HTML error page, not JSON. Parsing it first threw before
+        // the officer was ever told the upload failed.
+        const uploadData = await uploadRes
+          .json()
+          .catch(() => ({}) as { error?: string; publicUrl?: string });
         if (!uploadRes.ok) {
           toast.error(uploadData.error || "Failed to upload resolution photo");
-          setSubmitting(false);
           return;
         }
         resolutionPhotoUrl = uploadData.publicUrl;
@@ -95,6 +103,8 @@ export function StatusUpdateForm({
       setNote("");
       setResolutionPhoto(null);
       router.refresh();
+    } catch {
+      toast.error("Could not update the status. Check your connection and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -150,7 +160,14 @@ export function StatusUpdateForm({
             id="resolutionPhoto"
             type="file"
             accept="image/*"
-            onChange={(e) => setResolutionPhoto(e.target.files?.[0] ?? null)}
+            onChange={async (e) => {
+              // Downscaled in the browser, exactly as the citizen's capture
+              // does. A raw phone camera JPEG is several megabytes and blows
+              // past the platform's request-body limit before our own 8MB
+              // check ever runs.
+              const file = e.target.files?.[0];
+              setResolutionPhoto(file ? await downscaleImage(file) : null);
+            }}
             className="text-sm"
           />
         </div>

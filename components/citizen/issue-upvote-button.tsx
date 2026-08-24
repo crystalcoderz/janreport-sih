@@ -21,15 +21,22 @@ export function IssueUpvoteButton({
   async function toggle() {
     setPending(true);
     const method = upvoted ? "DELETE" : "POST";
-    const res = await fetch(`/api/issues/${issueId}/upvote`, { method });
-    setPending(false);
-
-    if (!res.ok) {
-      toast.error("Could not update your upvote. Please try again.");
-      return;
+    // finally, not a bare call: fetch rejects outright on a dropped
+    // connection, and without this the button stayed disabled for the rest of
+    // the page's life with nothing said.
+    try {
+      const res = await fetch(`/api/issues/${issueId}/upvote`, { method });
+      if (!res.ok) {
+        toast.error("Could not update your upvote. Please try again.");
+        return;
+      }
+      setUpvoted(!upvoted);
+      setCount((c) => c + (upvoted ? -1 : 1));
+    } catch {
+      toast.error("Could not reach JanReport. Check your connection.");
+    } finally {
+      setPending(false);
     }
-    setUpvoted(!upvoted);
-    setCount((c) => c + (upvoted ? -1 : 1));
   }
 
   return (

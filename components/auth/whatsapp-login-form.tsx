@@ -22,57 +22,71 @@ export function WhatsAppLoginForm() {
   async function requestCode(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch("/api/auth/whatsapp/request-otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone }),
-    });
-    const data = await res.json();
-    setLoading(false);
+    try {
+      const res = await fetch("/api/auth/whatsapp/request-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      // A gateway error page is not JSON and json() rejects on it, which used
+      // to strand the button on "Sending..." with no way to retry.
+      const data: { error?: string; devCode?: string } = await res
+        .json()
+        .catch(() => ({}));
 
-    if (!res.ok) {
-      toast.error(data.error || "Could not send a code. Please try again.");
-      return;
+      if (!res.ok) {
+        toast.error(data.error || "Could not send a code. Please try again.");
+        return;
+      }
+      if (data.devCode) {
+        toast.info(`WhatsApp isn't configured yet — your demo code is ${data.devCode}`);
+      } else {
+        toast.success("Code sent on WhatsApp.");
+      }
+      setStep({ stage: "code", phone, devCode: data.devCode });
+    } catch {
+      toast.error("Could not reach JanReport. Check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
-    if (data.devCode) {
-      toast.info(`WhatsApp isn't configured yet — your demo code is ${data.devCode}`);
-    } else {
-      toast.success("Code sent on WhatsApp.");
-    }
-    setStep({ stage: "code", phone, devCode: data.devCode });
   }
 
   async function verifyCode(e: React.FormEvent) {
     e.preventDefault();
     if (step.stage !== "code") return;
     setLoading(true);
-    const res = await fetch("/api/auth/whatsapp/verify-otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: step.phone, code, fullName }),
-    });
-    const data = await res.json();
-    setLoading(false);
+    try {
+      const res = await fetch("/api/auth/whatsapp/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: step.phone, code, fullName }),
+      });
+      const data: { error?: string } = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      toast.error(data.error || "Could not verify that code.");
-      return;
+      if (!res.ok) {
+        toast.error(data.error || "Could not verify that code.");
+        return;
+      }
+
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const { data: profile } = user
+        ? await supabase.from("profiles").select("role").eq("id", user.id).single()
+        : { data: null };
+
+      router.push(
+        profile?.role === "officer" || profile?.role === "admin"
+          ? "/dashboard"
+          : "/report"
+      );
+      router.refresh();
+    } catch {
+      toast.error("Could not reach JanReport. Check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
-
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    const { data: profile } = user
-      ? await supabase.from("profiles").select("role").eq("id", user.id).single()
-      : { data: null };
-
-    router.push(
-      profile?.role === "officer" || profile?.role === "admin"
-        ? "/dashboard"
-        : "/report"
-    );
-    router.refresh();
   }
 
   if (step.stage === "code") {
