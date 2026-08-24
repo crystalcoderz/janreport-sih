@@ -151,6 +151,21 @@ describe("matchesAllowlist", () => {
     expect(matchesAllowlist("anyone@pwd.jharkhand.gov.in", ["pwd.jharkhand.gov.in"])).toBe(true);
   });
 
+  it("never domain-matches a public webmail provider", () => {
+    // Real case: Nagar Nigam Ghaziabad publishes a Gmail address as its
+    // official contact. Domain-matching it would trust the entire internet.
+    const list = ["gzb.nagar.nigam@gmail.com"];
+    expect(matchesAllowlist("gzb.nagar.nigam@gmail.com", list)).toBe(true);
+    expect(matchesAllowlist("literally.anyone@gmail.com", list)).toBe(false);
+    expect(matchesAllowlist("attacker@yahoo.co.in", ["someone@yahoo.co.in"])).toBe(false);
+    expect(matchesAllowlist("attacker@rediffmail.com", ["office@rediffmail.com"])).toBe(false);
+  });
+
+  it("still domain-matches a genuine government domain", () => {
+    expect(matchesAllowlist("clerk@gnida.in", ["authority@gnida.in"])).toBe(true);
+    expect(matchesAllowlist("someone@nic.in", ["nnlko@nic.in"])).toBe(true);
+  });
+
   it("rejects strangers and lookalike domains", () => {
     const list = ["commissioner@nagarnigam.gov.in"];
     expect(matchesAllowlist("attacker@gmail.com", list)).toBe(false);

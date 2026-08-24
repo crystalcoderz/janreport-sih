@@ -118,13 +118,48 @@ export function isValidSignature(
   });
 }
 
+// Domains where an address says nothing about who the sender is.
+//
+// This matters more than it looks. Indian municipal bodies genuinely publish
+// free webmail addresses as their official contact -- Nagar Nigam Ghaziabad
+// lists gzb.nagar.nigam@gmail.com on its own site, and Mathura-Vrindavan does
+// the same. Domain-matching those would make every Gmail account on earth a
+// trusted municipal sender, so for these domains only an exact address match
+// counts.
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "yahoo.com",
+  "yahoo.co.in",
+  "yahoo.in",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "msn.com",
+  "rediffmail.com",
+  "rediff.com",
+  "icloud.com",
+  "me.com",
+  "aol.com",
+  "protonmail.com",
+  "proton.me",
+  "zoho.com",
+  "zohomail.in",
+  "mail.com",
+  "gmx.com",
+  "yandex.com",
+]);
+
 // Who is allowed to speak as a municipal office.
 //
-// The allowlist is built from the same operator-configured addresses a
-// complaint is sent to, so it can never drift from who we actually wrote to.
+// The allowlist is built from the same addresses a complaint is actually sent
+// to, so it can never drift from who we wrote to. Entries may be full
+// addresses or bare domains.
+//
 // Domains are matched as well as exact addresses, because a complaint
 // addressed to the commissioner is routinely answered by a clerk at the same
-// office. Entries may be full addresses or bare domains.
+// office -- but never for a public webmail domain, where the domain identifies
+// nobody. There, the address must match exactly.
 //
 // An empty allowlist refuses everything, which is the correct posture: if no
 // office has been given an address, no office can legitimately be replying.
@@ -140,7 +175,13 @@ export function matchesAllowlist(from: string, entries: (string | null | undefin
   }
   if (allowed.size === 0) return false;
   if (allowed.has(addr)) return true;
-  return [...allowed].some(
-    (entry) => (entry.includes("@") ? entry.split("@")[1] : entry) === domain
-  );
+
+  // Exact match was the only chance for a webmail sender.
+  if (PUBLIC_EMAIL_DOMAINS.has(domain)) return false;
+
+  return [...allowed].some((entry) => {
+    const entryDomain = entry.includes("@") ? entry.split("@")[1] : entry;
+    if (!entryDomain || PUBLIC_EMAIL_DOMAINS.has(entryDomain)) return false;
+    return entryDomain === domain;
+  });
 }
