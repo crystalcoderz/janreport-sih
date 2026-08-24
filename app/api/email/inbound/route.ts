@@ -1,4 +1,5 @@
 import { NextResponse, after, type NextRequest } from "next/server";
+import { createHmac, timingSafeEqual } from "crypto";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { sendEmail } from "@/lib/email/client";
@@ -43,10 +44,75 @@ function extractNewText(body: string): string {
   return head.replace(/\s+\n/g, "\n").trim().slice(0, 1500);
 }
 
+// Resend signs webhooks the Svix way: HMAC-SHA256 over "<id>.<timestamp>.<body>"
+// with the secret after its `whsec_` prefix, base64-encoded, and the header may
+// carry several space-separated candidate signatures during a secret rotation.
+// Implemented here rather than pulling in the svix package for one function.
+function isValidSignature(raw: string, headers: Headers): boolean {
+  const secret = process.env.RESEND_WEBHOOK_SECRET;
+  // Unset means the endpoint is not yet wired to Resend; accept and warn
+  // rather than silently discarding real mail during setup.
+  if (!secret) return true;
+
+  const id = headers.get("svix-id");
+  const timestamp = headers.get("svix-timestamp");
+  const signature = headers.get("svix-signature");
+  if (!id || !timestamp || !signature) return false;
+
+  // Reject anything older than five minutes so a captured request cannot be
+  // replayed indefinitely.
+  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!Number.isFinite(age) || age > 300) return false;
+
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const expected = createHmac("sha256", key)
+    .update(`${id}.${timestamp}.${raw}`)
+    .digest("base64");
+
+  return signature.split(" ").some((part) => {
+    const candidate = part.split(",")[1];
+    if (!candidate) return false;
+    const a = Buffer.from(candidate);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
+  });
+}
+
+// The webhook carries metadata only — no body, headers or attachments — so the
+// message itself has to be fetched back by id before anything can be matched.
+async function fetchReceivedEmail(
+  emailId: string
+): Promise<{ text?: string; html?: string; subject?: string; from?: string; to?: string[] } | null> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(`https://api.resend.com/emails/${emailId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) {
+      console.error("[inbound] could not fetch the received email", res.status);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("[inbound] fetch threw", err);
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
+  const raw = await request.text();
+
+  if (!isValidSignature(raw, request.headers)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+  if (!process.env.RESEND_WEBHOOK_SECRET) {
+    console.warn("[inbound] RESEND_WEBHOOK_SECRET not set — signature not verified");
+  }
+
   let payload: unknown;
   try {
-    payload = await request.json();
+    payload = JSON.parse(raw);
   } catch {
     console.warn("[inbound] unparseable body");
     return NextResponse.json({ ok: true });
@@ -63,9 +129,26 @@ export async function POST(request: NextRequest) {
   const text = String(msg.text ?? "");
   const html = String(msg.html ?? "");
 
-  const reference = findReference(to, subject, text, html);
+  // Fetch the body when the webhook did not carry one, which is the normal
+  // case for email.received.
+  let bodyText = text;
+  let bodyHtml = html;
+  let realSubject = subject;
+  let realFrom = from;
+  const emailId = String(msg.email_id ?? msg.id ?? "");
+  if (!bodyText && !bodyHtml && emailId) {
+    const full = await fetchReceivedEmail(emailId);
+    if (full) {
+      bodyText = full.text ?? "";
+      bodyHtml = full.html ?? "";
+      realSubject = full.subject ?? realSubject;
+      realFrom = Array.isArray(full.to) ? realFrom : (full.from ?? realFrom);
+    }
+  }
+
+  const reference = findReference(to, realSubject, bodyText, bodyHtml);
   if (!reference) {
-    console.warn(`[inbound] no reference found; from=${from} subject=${subject.slice(0, 80)}`);
+    console.warn(`[inbound] no reference found; from=${realFrom} subject=${realSubject.slice(0, 80)}`);
     return NextResponse.json({ ok: true, matched: false });
   }
 
@@ -84,7 +167,8 @@ export async function POST(request: NextRequest) {
       return;
     }
 
-    const reply = extractNewText(text || html.replace(/<[^>]+>/g, " ")) || "(no message body)";
+    const reply =
+      extractNewText(bodyText || bodyHtml.replace(/<[^>]+>/g, " ")) || "(no message body)";
 
     // Recorded on the timeline first, so the update survives even if both
     // notifications fail. status is unchanged — an officer decides that; this
@@ -132,7 +216,7 @@ export async function POST(request: NextRequest) {
       }).catch((err) => console.error("[inbound] email relay failed", err));
     }
 
-    console.log(`[inbound] ${reference}: relayed a reply from ${from}`);
+    console.log(`[inbound] ${reference}: relayed a reply from ${realFrom}`);
   });
 
   return NextResponse.json({ ok: true, matched: true, reference });
