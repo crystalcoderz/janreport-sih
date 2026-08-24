@@ -1,6 +1,8 @@
 import { slaHoursFor } from "@/lib/sla";
 import { findNearbyMunicipalOffice, type NearbyOffice } from "@/lib/places";
 import { sendEmail } from "@/lib/email/client";
+import { createServiceRoleClient } from "@/lib/supabase/server";
+import { findMunicipalOfficeFor, type MunicipalOffice } from "@/lib/municipal-directory";
 
 // The complaint that goes to the municipal body — a different document from
 // the citizen's confirmation. This one has to stand on its own in a clerk's
@@ -221,19 +223,49 @@ export function municipalComplaintEmail(
   };
 }
 
-// Who the complaint is actually sent to.
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+// Who the complaint is actually sent to, in priority order:
 //
-// Deliberately NOT derived from the Places lookup: that returns a name and a
-// postal address, never an email, and guessing an address for a real
-// government office — or scraping one — would mean this service emails a
-// public body it was never authorised to contact. The recipient is therefore
-// always something the operator configured: a per-department address if one
-// is set, otherwise a single fallback inbox. With neither set, nothing is
-// sent and the report files exactly as before.
-export function municipalRecipient(departmentEmail: string | null | undefined): string | null {
-  const configured = departmentEmail?.trim() || process.env.MUNICIPAL_EMAIL?.trim();
-  if (!configured) return null;
-  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(configured) ? configured : null;
+//   1. the department's own configured address, if the operator set one —
+//      an explicit choice always beats a lookup
+//   2. the nearest VERIFIED office in the municipal directory, chosen from the
+//      report's coordinates, so a Ghaziabad pothole reaches Ghaziabad
+//   3. MUNICIPAL_EMAIL, a single catch-all inbox
+//
+// Still deliberately NOT derived from the Places lookup: that returns a name
+// and a postal address, never an email. And still never pattern-built — every
+// directory row carries the page its address was read from, and unverified
+// rows are ignored entirely. With none of the three set, nothing is sent and
+// the report files exactly as before.
+export async function resolveMunicipalRecipient(params: {
+  departmentEmail?: string | null;
+  lat: number;
+  lng: number;
+}): Promise<{ email: string; office: MunicipalOffice | null; via: string } | null> {
+  const departmentConfigured = params.departmentEmail?.trim();
+  if (departmentConfigured && EMAIL_RE.test(departmentConfigured)) {
+    return { email: departmentConfigured, office: null, via: "department" };
+  }
+
+  const office = await findMunicipalOfficeFor(
+    createServiceRoleClient(),
+    params.lat,
+    params.lng
+  ).catch((err) => {
+    console.error("[municipal] directory lookup threw", err);
+    return null;
+  });
+
+  if (office && EMAIL_RE.test(office.contactEmail)) {
+    return { email: office.contactEmail, office, via: "directory" };
+  }
+
+  const fallback = process.env.MUNICIPAL_EMAIL?.trim();
+  if (fallback && EMAIL_RE.test(fallback)) {
+    return { email: fallback, office: null, via: "fallback" };
+  }
+  return null;
 }
 
 // Compose and send in one call, so both filing paths behave identically and
@@ -242,16 +274,22 @@ export async function sendMunicipalComplaint(params: {
   data: MunicipalComplaintData;
   departmentEmail?: string | null;
   viewUrl?: string;
-}): Promise<{ sent: boolean; to?: string; reason?: string }> {
-  const to = municipalRecipient(params.departmentEmail);
-  if (!to) return { sent: false, reason: "no_recipient_configured" };
+}): Promise<{ sent: boolean; to?: string; via?: string; reason?: string }> {
+  const recipient = await resolveMunicipalRecipient({
+    departmentEmail: params.departmentEmail,
+    lat: params.data.lat,
+    lng: params.data.lng,
+  });
+  if (!recipient) return { sent: false, reason: "no_recipient_configured" };
+  const to = recipient.email;
 
-  // Best-effort enrichment: the Places API is a separate product and may not
-  // be enabled, in which case the letter is addressed generically rather than
-  // not sent at all.
-  const office = await findNearbyMunicipalOffice(params.data.lat, params.data.lng).catch(
-    () => null
-  );
+  // Address the letter to the body we resolved from the directory, since we
+  // know its official name. Otherwise fall back to the Places lookup, which is
+  // best-effort: that API is a separate product and may not be enabled, in
+  // which case the letter is addressed generically rather than not sent.
+  const office: NearbyOffice | null = recipient.office
+    ? { name: recipient.office.name, address: "" }
+    : await findNearbyMunicipalOffice(params.data.lat, params.data.lng).catch(() => null);
 
   const mail = municipalComplaintEmail(params.data, office, params.viewUrl);
   // Plus-addressing carries the reference through the reply, so an answer can
@@ -265,6 +303,8 @@ export async function sendMunicipalComplaint(params: {
     console.error("Failed to send the municipal complaint", res.error);
     return { sent: false, reason: res.error };
   }
-  console.log(`[municipal] complaint ${params.data.id.slice(0, 8)} sent to ${to}`);
-  return { sent: true, to };
+  console.log(
+    `[municipal] complaint ${params.data.reference} sent to ${to} (via ${recipient.via})`
+  );
+  return { sent: true, to, via: recipient.via };
 }

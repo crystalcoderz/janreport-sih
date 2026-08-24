@@ -200,6 +200,42 @@ export interface Database {
           }
         ];
       };
+      // Researched municipal grievance contacts. Every row carries the page its
+      // address was read from; only `verified` rows are ever written to.
+      municipal_offices: {
+        Row: {
+          id: string;
+          name: string;
+          jurisdiction: string;
+          contact_email: string;
+          source_url: string;
+          quoted_context: string | null;
+          verified: boolean;
+          grievance_portal_url: string | null;
+          notes: string | null;
+          lat: number;
+          lng: number;
+          radius_km: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          jurisdiction: string;
+          contact_email: string;
+          source_url: string;
+          quoted_context?: string | null;
+          verified?: boolean;
+          grievance_portal_url?: string | null;
+          notes?: string | null;
+          lat: number;
+          lng: number;
+          radius_km?: number;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["municipal_offices"]["Insert"]>;
+        Relationships: [];
+      };
       // Claim rows for municipal replies already handled by the inbound
       // webhook, keyed by the Resend message id so a redelivery is a no-op.
       inbound_emails: {

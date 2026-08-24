@@ -175,6 +175,45 @@ create table issue_status_history (
   changed_at timestamptz not null default now()
 );
 
+-- The municipal contact directory: which real body a report is emailed to.
+--
+-- This exists because no API returns a municipal body's email address. Google
+-- Places gives a name and a postal address and nothing else, and an address
+-- cannot be derived from a name -- a pattern-built guess either bounces or,
+-- worse, reaches a stranger while the citizen is told their complaint was
+-- filed. So every address here was read off an official government page, and
+-- the row keeps source_url and quoted_context so a human can check that claim
+-- without redoing the search.
+--
+-- `verified` is the switch that says someone did check. Only verified rows are
+-- ever written to, so a half-researched entry is inert rather than dangerous.
+--
+-- radius_km is how far from (lat,lng) this body plausibly has jurisdiction; a
+-- report outside every radius gets no office at all rather than the nearest
+-- wrong one.
+--
+-- No policies and no grants: only the service role touches this table.
+create table municipal_offices (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  jurisdiction text not null unique,
+  contact_email text not null,
+  source_url text not null,
+  quoted_context text,
+  verified boolean not null default false,
+  grievance_portal_url text,
+  notes text,
+  lat double precision not null,
+  lng double precision not null,
+  radius_km integer not null default 25,
+  created_at timestamptz not null default now()
+);
+
+create index municipal_offices_verified_idx on municipal_offices (verified);
+
+alter table municipal_offices enable row level security;
+revoke all on municipal_offices from anon, authenticated;
+
 -- One row per municipal reply already handled by the inbound webhook.
 --
 -- Resend redelivers on any non-2xx, and the webhook deliberately answers 502

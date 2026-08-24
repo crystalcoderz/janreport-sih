@@ -2,6 +2,7 @@ import { NextResponse, after, type NextRequest } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { sendEmail } from "@/lib/email/client";
+import { verifiedOfficeEmails } from "@/lib/municipal-directory";
 import {
   esc,
   extractNewText,
@@ -70,22 +71,26 @@ async function fetchReceivedEmail(emailId: string): Promise<{
   }
 }
 
-// The allowlist entries: whatever the operator configured as a complaint
-// recipient, from either source, so it stays in step with who we write to.
+// The allowlist entries: every address a complaint can actually be sent to, so
+// the set of senders we trust stays in step with who we write to. Same three
+// sources as resolveMunicipalRecipient(), in the same order.
 async function allowlistEntries(
   supabase: ReturnType<typeof createServiceRoleClient>
 ): Promise<(string | null)[]> {
-  const { data } = await supabase
-    .from("departments")
-    .select("contact_email")
-    .not("contact_email", "is", null);
+  const [departments, offices] = await Promise.all([
+    supabase.from("departments").select("contact_email").not("contact_email", "is", null),
+    verifiedOfficeEmails(supabase),
+  ]);
 
   return [
     process.env.MUNICIPAL_EMAIL ?? null,
     // Extra addresses or bare domains an operator wants to trust, e.g.
     // "ranchimunicipal.gov.in,pwd.jharkhand.gov.in"
     ...(process.env.INBOUND_ALLOWED_SENDERS ?? "").split(","),
-    ...((data ?? []) as { contact_email: string | null }[]).map((d) => d.contact_email),
+    ...((departments.data ?? []) as { contact_email: string | null }[]).map(
+      (d) => d.contact_email
+    ),
+    ...offices,
   ];
 }
 
