@@ -1,3 +1,4 @@
+import { fetchAllIssuesForStats } from "@/lib/issues-query";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { computeCityStats } from "@/lib/analytics";
@@ -324,11 +325,11 @@ async function findNearbyIssues(
 
 async function getCityStats(ctx: ToolContext) {
   const [
-    { data: issues, error: issuesError },
+    { issues, error: issuesError },
     { data: departments, error: deptError },
     { data: resolvedHistory, error: historyError },
   ] = await Promise.all([
-    ctx.supabase.from("issues").select("*"),
+    fetchAllIssuesForStats(ctx.supabase),
     ctx.supabase.from("departments").select("*"),
     ctx.supabase
       .from("issue_status_history")

@@ -215,6 +215,28 @@ create index municipal_offices_verified_idx on municipal_offices (verified);
 alter table municipal_offices enable row level security;
 revoke all on municipal_offices from anon, authenticated;
 
+-- One row per classification attempt on the public report endpoint.
+--
+-- The rate limit used to count rows in `issues`, which missed the only
+-- requests worth limiting: a photo the junk screen rejects and a duplicate hit
+-- both spend a Gemini call and write no issue, so they could be looped
+-- indefinitely with the counter stuck at zero. Recorded before the call rather
+-- than after, because an attempt that throws still cost us the request.
+--
+-- No policies and no grants: only the service role writes here.
+create table report_attempts (
+  id         bigserial primary key,
+  user_id    uuid not null references profiles (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create index report_attempts_user_time_idx
+  on report_attempts (user_id, created_at desc);
+
+alter table report_attempts enable row level security;
+revoke all on report_attempts from anon, authenticated;
+revoke all on sequence report_attempts_id_seq from anon, authenticated;
+
 -- The citizen's email address, optional, one row per report that has one.
 --
 -- Deliberately not a column on `issues`. The select policy there is

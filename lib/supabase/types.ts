@@ -234,6 +234,30 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["municipal_offices"]["Insert"]>;
         Relationships: [];
       };
+      // One row per classification attempt, so the rate limit can see the
+      // requests that cost a Gemini call without writing an issue.
+      report_attempts: {
+        Row: {
+          id: number;
+          user_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          user_id: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["report_attempts"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "report_attempts_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       // The citizen's email address, held apart from `issues` so that a
       // permissive row-level policy on that table cannot expose it. No grants
       // to anon or authenticated; service role only. See lib/issue-contact.ts.

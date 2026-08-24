@@ -87,14 +87,22 @@ export async function POST(request: NextRequest) {
   // Deliberately the last check before the AI call, and deliberately after
   // the cheap validation above: classification is the only step here that
   // costs money, so a caller looping this endpoint bills us on every request
-  // whether or not a row is ever written. Counted from `issues` itself
-  // rather than a rate-limit table, so this needs no migration. Generous
-  // enough that a genuine reporter walking a street never notices.
-  const { count: recentByUser } = await supabase
-    .from("issues")
+  // whether or not a row is ever written.
+  //
+  // Counted from attempts rather than from `issues`, because the two paths
+  // that spend a Gemini call without writing a row -- a photo the junk screen
+  // rejects, and a duplicate hit -- left the old counter at zero. Those were
+  // exactly the requests worth limiting: they could be looped forever, each
+  // one billed, and the cap never moved. Generous enough that a genuine
+  // reporter walking a street never notices.
+  const windowStart = new Date(Date.now() - REPORT_WINDOW_MS).toISOString();
+  const admin = createServiceRoleClient();
+
+  const { count: recentByUser } = await admin
+    .from("report_attempts")
     .select("id", { count: "exact", head: true })
-    .eq("reporter_id", user.id)
-    .gte("created_at", new Date(Date.now() - REPORT_WINDOW_MS).toISOString());
+    .eq("user_id", user.id)
+    .gte("created_at", windowStart);
 
   if ((recentByUser ?? 0) >= MAX_REPORTS_PER_WINDOW) {
     return NextResponse.json(
@@ -105,6 +113,14 @@ export async function POST(request: NextRequest) {
       { status: 429 }
     );
   }
+
+  // Recorded before the call, not after: an attempt that throws still cost us
+  // the request, and counting only successes would let a caller loop failures
+  // for free.
+  const { error: attemptError } = await admin
+    .from("report_attempts")
+    .insert({ user_id: user.id });
+  if (attemptError) console.error("Failed to record a report attempt", attemptError);
 
   let classification;
   try {
@@ -189,7 +205,6 @@ export async function POST(request: NextRequest) {
   // classifier. Nothing from the request body is spread in. The points
   // trigger keys off new.reporter_id rather than auth.uid(), so it still
   // fires correctly.
-  const admin = createServiceRoleClient();
   const { data: issue, error: insertError } = await admin
     .from("issues")
     .insert({

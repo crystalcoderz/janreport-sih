@@ -1,3 +1,4 @@
+import { fetchAllIssuesForStats } from "@/lib/issues-query";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -13,7 +14,7 @@ export default async function AnalyticsPage() {
   const supabase = await createClient();
 
   const [issuesRes, departmentsRes, resolvedHistoryRes] = await Promise.all([
-    supabase.from("issues").select("*"),
+    fetchAllIssuesForStats(supabase),
     supabase.from("departments").select("*"),
     supabase
       .from("issue_status_history")
@@ -44,7 +45,7 @@ export default async function AnalyticsPage() {
   }
 
   const stats = computeCityStats(
-    issuesRes.data ?? [],
+    issuesRes.issues,
     departmentsRes.data ?? [],
     resolvedHistoryRes.data ?? []
   );

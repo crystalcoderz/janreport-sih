@@ -33,7 +33,12 @@ export function computeCityStats(
 ): CityStats {
   const total = issues.length;
   const resolved = issues.filter((i) => i.status === "resolved").length;
-  const critical = issues.filter((i) => i.ai_severity >= 9).length;
+  // Open only. Every consumer labels this "critical open", but without the
+  // status filter a city that had resolved all of its severe issues still
+  // showed them as outstanding forever -- the number only ever went up.
+  const critical = issues.filter(
+    (i) => i.ai_severity >= 9 && i.status !== "resolved" && i.status !== "rejected"
+  ).length;
   const resolutionRate = total ? Math.round((resolved / total) * 100) : 0;
   const avgSeverity = total
     ? (issues.reduce((s, i) => s + i.ai_severity, 0) / total).toFixed(1)
