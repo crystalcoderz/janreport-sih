@@ -101,7 +101,6 @@ export interface Database {
           assigned_team_id: string | null;
           assigned_at: string | null;
           reporter_name: string | null;
-          reporter_email: string | null;
           reference: string | null;
           acknowledgement_sent_at: string | null;
           created_at: string;
@@ -133,7 +132,6 @@ export interface Database {
           assigned_team_id?: string | null;
           assigned_at?: string | null;
           reporter_name?: string | null;
-          reporter_email?: string | null;
           reference?: string | null;
           acknowledgement_sent_at?: string | null;
           created_at?: string;
@@ -235,6 +233,31 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["municipal_offices"]["Insert"]>;
         Relationships: [];
+      };
+      // The citizen's email address, held apart from `issues` so that a
+      // permissive row-level policy on that table cannot expose it. No grants
+      // to anon or authenticated; service role only. See lib/issue-contact.ts.
+      issue_contacts: {
+        Row: {
+          issue_id: string;
+          email: string;
+          created_at: string;
+        };
+        Insert: {
+          issue_id: string;
+          email: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["issue_contacts"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "issue_contacts_issue_id_fkey";
+            columns: ["issue_id"];
+            isOneToOne: true;
+            referencedRelation: "issues";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       // Claim rows for municipal replies already handled by the inbound
       // webhook, keyed by the Resend message id so a redelivery is a no-op.

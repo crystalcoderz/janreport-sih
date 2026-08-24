@@ -3,6 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { sendEmail } from "@/lib/email/client";
 import { verifiedOfficeEmails } from "@/lib/municipal-directory";
+import { getIssueContact } from "@/lib/issue-contact";
 import {
   esc,
   extractNewText,
@@ -181,7 +182,7 @@ export async function POST(request: NextRequest) {
 
     const { data: issue, error: issueError } = await supabase
       .from("issues")
-      .select("id, reference, title, status, reporter_id, reporter_email, reporter_name")
+      .select("id, reference, title, status, reporter_id, reporter_name")
       .eq("reference", reference)
       .maybeSingle();
 
@@ -240,9 +241,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (issue.reporter_email) {
+    const reporterEmail = await getIssueContact(supabase, issue.id);
+    if (reporterEmail) {
       await sendEmail({
-        to: issue.reporter_email,
+        to: reporterEmail,
         subject: `Update on ${ref} — ${issue.title}`,
         text: `The municipal office has responded to your report.\n\nRef: ${ref}\n\n${reply}`,
         html:

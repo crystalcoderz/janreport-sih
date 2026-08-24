@@ -122,9 +122,10 @@ create table issues (
   -- which is usually null there and may not be the person at the issue) —
   -- used to personalize the officer-facing acknowledgement letter.
   reporter_name text,
-  -- Optional. Citizens who give one get a filed-report confirmation and an
-  -- email on every status change; those who do not still report normally.
-  reporter_email text,
+  -- NB: the citizen's email address is NOT here. It lives in issue_contacts,
+  -- because RLS on this table is row-level and permissive -- every signed-in
+  -- user may select every row -- so any column here is readable by anyone who
+  -- can sign up. See the comment on that table.
   -- Human-quotable tracking id, JR-YYMM-NNNN, assigned by the trigger below.
   -- This is the id a citizen is told, the id the municipal complaint is filed
   -- under, and the id an office quotes when it replies -- so the inbound
@@ -213,6 +214,29 @@ create index municipal_offices_verified_idx on municipal_offices (verified);
 
 alter table municipal_offices enable row level security;
 revoke all on municipal_offices from anon, authenticated;
+
+-- The citizen's email address, optional, one row per report that has one.
+--
+-- Deliberately not a column on `issues`. The select policy there is
+-- `using (true)` for every authenticated user -- which is right, the map and
+-- the issue pages are meant to be public to signed-in citizens -- but RLS is
+-- row-level only. It cannot hide a column. While the address sat on `issues`,
+-- one PostgREST call with an ordinary citizen's token returned every
+-- reporter's name, email and reported coordinates, and any `select("*")`
+-- feeding a client component serialised the same into the page payload.
+--
+-- Splitting it out makes that structurally impossible instead of depending on
+-- a column list nobody remembers to maintain: no grants to anon or
+-- authenticated, so only the service role can read it, and only to send that
+-- citizen their own mail.
+create table issue_contacts (
+  issue_id   uuid primary key references issues (id) on delete cascade,
+  email      text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table issue_contacts enable row level security;
+revoke all on issue_contacts from anon, authenticated;
 
 -- One row per municipal reply already handled by the inbound webhook.
 --

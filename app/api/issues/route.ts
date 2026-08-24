@@ -5,6 +5,7 @@ import { reverseGeocode } from "@/lib/geo";
 import { sendEmail } from "@/lib/email/client";
 import { reportFiledEmail } from "@/lib/email/templates";
 import { sendMunicipalComplaint } from "@/lib/email/municipal";
+import { saveIssueContact } from "@/lib/issue-contact";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
 import {
@@ -204,7 +205,6 @@ export async function POST(request: NextRequest) {
       lng,
       address: address ?? undefined,
       department_id: departmentResult.data?.id ?? null,
-      reporter_email: reporterEmail ?? null,
     })
     .select("*, departments(name)")
     .single();
@@ -216,6 +216,9 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+
+  // Stored separately from the report itself — see lib/issue-contact.ts.
+  await saveIssueContact(admin, issue.id, reporterEmail);
 
   await pushNearbyIssueAlerts(issue.id);
 

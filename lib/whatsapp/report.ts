@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { saveIssueContact } from "@/lib/issue-contact";
 import { classifyIssuePhoto, rejectionFor } from "@/lib/ai/classify";
 import {
   comparePhotosForDuplicate,
@@ -462,8 +463,6 @@ export async function finalizeReportIfReady(
       address: address ?? undefined,
       department_id: departmentResult.data?.id ?? null,
       reporter_name: session.reporter_name,
-      // EMAIL_DECLINED is a sentinel, not an address — never store it.
-      reporter_email: isRealEmail(session.reporter_email) ? session.reporter_email : null,
     })
     .select("*, departments(name)")
     .single();
@@ -476,6 +475,14 @@ export async function finalizeReportIfReady(
     console.error("WhatsApp issue insert failed", insertError);
     return { status: "error", message: "Could not save your report. Please try again." };
   }
+
+  // EMAIL_DECLINED is a sentinel, not an address — never store it. Held
+  // apart from the report itself; see lib/issue-contact.ts.
+  await saveIssueContact(
+    supabase,
+    issue.id,
+    isRealEmail(session.reporter_email) ? session.reporter_email : null
+  );
 
   await supabase.from("whatsapp_report_sessions").delete().eq("phone", phone);
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
+import { getIssueContact } from "@/lib/issue-contact";
 import { verifyResolution } from "@/lib/ai/verify-resolution";
 import { sendEmail } from "@/lib/email/client";
 import { statusChangedEmail, resolvedEmail } from "@/lib/email/templates";
@@ -60,6 +61,37 @@ export async function PATCH(
     .maybeSingle();
   const previousStatus = (prior?.status ?? "reported") as IssueStatus;
 
+  // An officer adding a note leaves the select on its current value, so the
+  // ordinary "record what I did" interaction arrives as a status change to the
+  // status it already has. Treated as a real transition it re-sent the
+  // citizen's resolution email and re-ran AI verification every time. The note
+  // is still recorded below; only the side effects are gated on an actual move.
+  const isTransition = status !== previousStatus;
+
+  // Legal moves. Absent this, an officer (or a crafted request) could send a
+  // resolved report back to "reported", or resolve something twice and notify
+  // the citizen twice. Resolved and rejected are terminal — reopening is a
+  // deliberate act that this endpoint does not model.
+  const ALLOWED_NEXT: Record<IssueStatus, IssueStatus[]> = {
+    reported: ["acknowledged", "in_progress", "rejected"],
+    acknowledged: ["in_progress", "resolved", "rejected"],
+    in_progress: ["resolved", "rejected"],
+    resolved: [],
+    rejected: [],
+  };
+
+  if (isTransition && !ALLOWED_NEXT[previousStatus].includes(status)) {
+    return NextResponse.json(
+      {
+        error: `Cannot move a ${previousStatus.replace("_", " ")} report to ${status.replace(
+          "_",
+          " "
+        )}.`,
+      },
+      { status: 409 }
+    );
+  }
+
   // RLS (issues_update_officer_admin) enforces that only an officer for
   // this issue's department, or an admin, can perform this update.
   const { data: issue, error: updateError } = await supabase
@@ -92,7 +124,7 @@ export async function PATCH(
   // succeeded above, and a verification failure must never undo it or
   // fail the request. A null verdict simply reads as "not verified".
   let verified = issue;
-  if (status === "resolved" && issue.resolution_photo_url && issue.photo_url) {
+  if (isTransition && status === "resolved" && issue.resolution_photo_url && issue.photo_url) {
     try {
       const result = await verifyResolution({
         beforeUrl: issue.photo_url,
@@ -123,11 +155,17 @@ export async function PATCH(
     }
   }
 
+  // Read with the service role: the address lives in issue_contacts, which
+  // grants nothing to `authenticated`, precisely so an officer's session (or
+  // any citizen's) cannot reach another reporter's email.
+  const reporterEmail = await getIssueContact(createServiceRoleClient(), id);
+
   // Email the citizen, if they gave an address. After the verdict block on
   // purpose, so a resolution email carries the AI's verdict rather than
   // arriving first and contradicting it. Best-effort: the status change has
-  // already succeeded and must not be undone by a mail failure.
-  if (verified.reporter_email) {
+  // already succeeded and must not be undone by a mail failure. Skipped
+  // entirely when the status did not actually move — see isTransition.
+  if (isTransition && reporterEmail) {
     try {
       const data = {
         id: verified.id,
@@ -147,8 +185,13 @@ export async function PATCH(
         createdAt: verified.created_at,
       };
       const viewUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${verified.id}`;
+      // The resolved template leads with a verdict on the department's proof
+      // photo. With no such photo the verdict defaulted to "unclear" and the
+      // citizen was told "Photo inconclusive" about a photo that was never
+      // submitted. A resolution without proof gets the plain notice instead —
+      // same "Resolved — <title>" subject, no invented finding.
       const mail =
-        status === "resolved"
+        status === "resolved" && verified.resolution_photo_url
           ? resolvedEmail(
               data,
               {
@@ -161,14 +204,14 @@ export async function PATCH(
             )
           : statusChangedEmail(data, previousStatus, note, viewUrl);
 
-      const sent = await sendEmail({ to: verified.reporter_email, ...mail });
+      const sent = await sendEmail({ to: reporterEmail, ...mail });
       if (!sent.ok) console.error("Failed to email the status update", sent.error);
     } catch (err) {
       console.error("Status-update email threw", err);
     }
   }
 
-  if (status === "resolved" && isWhatsAppConfigured()) {
+  if (isTransition && status === "resolved" && isWhatsAppConfigured()) {
     // Best-effort, never blocks the response — the status update (and the
     // verdict above) already succeeded regardless of whether this send works.
     notifyReporterOnWhatsApp(verified).catch((err) => {
