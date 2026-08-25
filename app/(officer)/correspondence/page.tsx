@@ -15,7 +15,27 @@ import { Badge } from "@/components/ui/badge";
 // existed a complaint left nothing behind but a log line, so the honest answer
 // was that nobody knew.
 
-export default async function CorrespondencePage() {
+type QueueSort = "severity" | "newest" | "oldest";
+
+const QUEUE_SORTS: { value: QueueSort; label: string }[] = [
+  { value: "severity", label: "Most severe" },
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+];
+
+export default async function CorrespondencePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>;
+}) {
+  const { sort: rawSort } = await searchParams;
+  // Severity by default: the queue exists to be worked through, and a
+  // sparking transformer should not sit below a mowing request. Date is there
+  // because "what came in today" is the other question worth asking of it.
+  const sort: QueueSort = QUEUE_SORTS.some((s) => s.value === rawSort)
+    ? (rawSort as QueueSort)
+    : "severity";
+
   const profile = await getCurrentProfile();
   // Same gate as /analytics and /bot-users. This lists municipal addresses and
   // their replies verbatim, and municipal_emails grants nothing to
@@ -24,6 +44,18 @@ export default async function CorrespondencePage() {
 
   const [{ mail, sent, received, repliedIssues }, { pending, unroutable }] =
     await Promise.all([getRecentMail(150), getPendingComplaints()]);
+
+  // Sorted here rather than in the query: the queue is short, and keeping the
+  // rule next to the control that sets it means the two cannot drift.
+  const sortedPending = [...pending].sort((a, b) => {
+    if (sort === "newest") return +new Date(b.createdAt) - +new Date(a.createdAt);
+    if (sort === "oldest") return +new Date(a.createdAt) - +new Date(b.createdAt);
+    // Severity, with the older of two equally severe reports first — it has
+    // been waiting longer.
+    return (
+      b.severity - a.severity || +new Date(a.createdAt) - +new Date(b.createdAt)
+    );
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,9 +78,29 @@ export default async function CorrespondencePage() {
           name, so it waits here until a person decides it is worth an
           office's attention. */}
       <section className="flex flex-col gap-2">
-        <h2 className="font-mono text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
-          Awaiting your approval
-        </h2>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h2 className="font-mono text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+            Awaiting your approval
+          </h2>
+          {pending.length > 1 && (
+            <div className="flex items-center gap-2 text-xs">
+              {QUEUE_SORTS.map((s) => (
+                <Link
+                  key={s.value}
+                  href={s.value === "severity" ? "/correspondence" : `/correspondence?sort=${s.value}`}
+                  scroll={false}
+                  className={
+                    s.value === sort
+                      ? "font-medium text-foreground underline underline-offset-4"
+                      : "text-muted-foreground hover:text-foreground"
+                  }
+                >
+                  {s.label}
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
         {pending.length === 0 ? (
           <Card>
             <CardContent className="pt-6 text-sm text-muted-foreground">
@@ -66,7 +118,7 @@ export default async function CorrespondencePage() {
               </p>
             )}
             <ol className="flex flex-col gap-2">
-              {pending.map((p) => (
+              {sortedPending.map((p) => (
                 <li key={p.issueId}>
                   <Card>
                     <CardContent className="flex flex-col gap-2 py-4">
