@@ -20,6 +20,7 @@ export default async function OfficerLayout({
       ? [
           { href: "/analytics", labelKey: "nav.analytics" as const },
           { href: "/bot-users", labelKey: "nav.botUsers" as const },
+          { href: "/correspondence", labelKey: "nav.correspondence" as const },
         ]
       : []),
   ];

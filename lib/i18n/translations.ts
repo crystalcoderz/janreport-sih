@@ -13,6 +13,7 @@ export const en = {
   "nav.dashboard": "Dashboard",
   "nav.analytics": "Analytics",
   "nav.botUsers": "Bot Users",
+  "nav.correspondence": "Municipal Mail",
   "nav.signOut": "Sign out",
 
   "landing.signIn": "Sign in",

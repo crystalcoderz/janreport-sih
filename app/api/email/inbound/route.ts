@@ -3,6 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { sendEmail } from "@/lib/email/client";
 import { verifiedOfficeEmails } from "@/lib/municipal-directory";
+import { recordMunicipalMail } from "@/lib/municipal-mail";
 import { getIssueContact } from "@/lib/issue-contact";
 import {
   esc,
@@ -208,6 +209,18 @@ export async function POST(request: NextRequest) {
       console.log(`[inbound] ${reference}: reply had no new text; not relayed`);
       return;
     }
+
+    // Filed as correspondence as well as on the timeline: the dashboard shows
+    // the office's reply next to the complaint it answers, which the timeline
+    // alone cannot do.
+    await recordMunicipalMail({
+      issueId: issue.id,
+      direction: "inbound",
+      address: from,
+      subject: subject || null,
+      body: reply,
+      providerMessageId: emailId || null,
+    });
 
     // Recorded on the timeline first, so the update survives even if both
     // notifications fail. status is unchanged — an officer decides that; this

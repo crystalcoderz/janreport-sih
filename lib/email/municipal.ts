@@ -3,6 +3,7 @@ import { findNearbyMunicipalOffice, type NearbyOffice } from "@/lib/places";
 import { sendEmail } from "@/lib/email/client";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { findMunicipalOfficeFor, type MunicipalOffice } from "@/lib/municipal-directory";
+import { recordMunicipalMail } from "@/lib/municipal-mail";
 
 // The complaint that goes to the municipal body — a different document from
 // the citizen's confirmation. This one has to stand on its own in a clerk's
@@ -305,6 +306,19 @@ export async function sendMunicipalComplaint(params: {
     console.error("Failed to send the municipal complaint", res.error);
     return { sent: false, reason: res.error };
   }
+  // Filed so the dashboard can show what was actually sent. Until this
+  // existed, a complaint left nothing behind but a log line, and an officer
+  // could not tell whether the nagar nigam had been written to at all.
+  await recordMunicipalMail({
+    issueId: params.data.id,
+    direction: "outbound",
+    address: to,
+    subject: mail.subject,
+    body: mail.text,
+    officeName: recipient.office?.name ?? office?.name ?? null,
+    providerMessageId: res.id ?? null,
+  });
+
   console.log(
     `[municipal] complaint ${params.data.reference} sent to ${to} (via ${recipient.via})`
   );

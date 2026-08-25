@@ -234,6 +234,42 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["municipal_offices"]["Insert"]>;
         Relationships: [];
       };
+      // What JanReport said to a municipal body and what it said back, so the
+      // dashboard can show the complaint beside its reply.
+      municipal_emails: {
+        Row: {
+          id: number;
+          issue_id: string;
+          direction: "outbound" | "inbound";
+          address: string;
+          subject: string | null;
+          body: string | null;
+          office_name: string | null;
+          provider_message_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          issue_id: string;
+          direction: "outbound" | "inbound";
+          address: string;
+          subject?: string | null;
+          body?: string | null;
+          office_name?: string | null;
+          provider_message_id?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["municipal_emails"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "municipal_emails_issue_id_fkey";
+            columns: ["issue_id"];
+            isOneToOne: false;
+            referencedRelation: "issues";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       // Short-term memory for the WhatsApp bot: the recent exchange for one
       // number, so a follow-up like "Yes" or "Today one" has something to
       // refer to. See lib/whatsapp/conversation.ts.

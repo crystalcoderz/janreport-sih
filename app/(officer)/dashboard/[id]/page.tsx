@@ -11,6 +11,8 @@ import { AssignTeamForm } from "@/components/dashboard/assign-team-form";
 import { SendAcknowledgementButton } from "@/components/dashboard/send-acknowledgement-button";
 import { IssueLocationMap } from "@/components/map/issue-location-map";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
+import { MunicipalMailThread } from "@/components/dashboard/municipal-mail-thread";
+import { getMailForIssue } from "@/lib/municipal-mail";
 import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
 import { IssueComments } from "@/components/issue/issue-comments";
 import { ConsolePanel } from "@/components/dashboard/console-panel";
@@ -48,6 +50,14 @@ export default async function IssueDetailPage({
     ]);
 
   if (!issue) notFound();
+
+  // Read with the service role, so it is fetched only after the officer layout
+  // has established who is asking. municipal_emails grants nothing to
+  // `authenticated` -- it holds the office's address and its reply verbatim.
+  const municipalMail =
+    profile?.role === "officer" || profile?.role === "admin"
+      ? await getMailForIssue(issue.id)
+      : [];
 
   // Crews for this issue's department only. A crew with no department is not
   // "dispatchable anywhere" — the database trigger rejects it outright — so
@@ -171,6 +181,12 @@ export default async function IssueDetailPage({
         <ConsolePanel title="Update status">
           <StatusUpdateForm issueId={issue.id} currentStatus={issue.status} />
         </ConsolePanel>
+
+        {(profile?.role === "officer" || profile?.role === "admin") && (
+          <ConsolePanel title="Municipal correspondence">
+            <MunicipalMailThread mail={municipalMail} />
+          </ConsolePanel>
+        )}
 
         <ConsolePanel title="Timeline">
           <IssueTimeline

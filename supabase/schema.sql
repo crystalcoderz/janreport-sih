@@ -215,6 +215,37 @@ create index municipal_offices_verified_idx on municipal_offices (verified);
 alter table municipal_offices enable row level security;
 revoke all on municipal_offices from anon, authenticated;
 
+-- What JanReport said to a municipal body, and what it said back.
+--
+-- The complaint used to go out leaving nothing behind but a log line, so an
+-- officer looking at a report could not tell whether the nagar nigam had been
+-- written to at all, let alone what was sent. The reply fared slightly better
+-- -- it landed as a note on the timeline -- but mixed in among status changes
+-- and with no sign of the message that prompted it.
+--
+-- `address` is the recipient on the way out and the sender on the way back.
+-- No policies and no grants: this holds a municipal address and its reply
+-- verbatim, and the pages that show it check the reader is an officer or admin
+-- before touching the service-role client.
+create table municipal_emails (
+  id                  bigserial primary key,
+  issue_id            uuid not null references issues (id) on delete cascade,
+  direction           text not null check (direction in ('outbound','inbound')),
+  address             text not null,
+  subject             text,
+  body                text,
+  office_name         text,
+  provider_message_id text,
+  created_at          timestamptz not null default now()
+);
+
+create index municipal_emails_issue_idx on municipal_emails (issue_id, created_at desc);
+create index municipal_emails_time_idx on municipal_emails (created_at desc);
+
+alter table municipal_emails enable row level security;
+revoke all on municipal_emails from anon, authenticated;
+revoke all on sequence municipal_emails_id_seq from anon, authenticated;
+
 -- Short-term memory for the WhatsApp bot: the recent exchange for one number.
 --
 -- Every message used to be handled in isolation -- the agent saw the current
