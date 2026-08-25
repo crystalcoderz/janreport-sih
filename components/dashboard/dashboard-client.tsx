@@ -36,6 +36,7 @@ import {
   FileCheck2,
   ChevronRight,
   UserPlus,
+  User,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -187,7 +188,7 @@ export function DashboardClient({
       if (quickFilter === "resolved" && issue.status !== "resolved") return false;
       if (quickFilter === "pendingAck" && !needsAcknowledgement(issue)) return false;
       if (q) {
-        const haystack = `${issue.title} ${issue.address ?? ""} ${
+        const haystack = `${issue.title} ${issue.reporter_name ?? ""} ${issue.address ?? ""} ${
           issue.departments?.name ?? ""
         } ${CATEGORY_LABELS[issue.ai_category as IssueCategory] ?? issue.ai_category}`;
         if (!haystack.toLowerCase().includes(q)) return false;
@@ -643,6 +644,16 @@ function IssueRow({ issue }: { issue: Issue }) {
             {issue.departments?.name ?? "Unassigned"} ·{" "}
             {CATEGORY_LABELS[issue.ai_category as IssueCategory] ?? issue.ai_category} ·{" "}
             {formatDistanceToNow(new Date(issue.created_at), { addSuffix: true })}
+          </p>
+
+          {/* Who filed it. An officer triaging a list needs to know whether
+              three reports are three people or one person reporting three
+              times, and it is the name they will address if they message. */}
+          <p className="flex items-center gap-1 truncate text-xs text-muted-foreground/80">
+            <User className="size-3 shrink-0" />
+            <span className="truncate">
+              {issue.reporter_name ?? "a citizen"}
+            </span>
           </p>
 
           <p className="flex items-center gap-1 text-xs">

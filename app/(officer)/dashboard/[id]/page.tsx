@@ -13,6 +13,9 @@ import { IssueLocationMap } from "@/components/map/issue-location-map";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
 import { MunicipalMailThread } from "@/components/dashboard/municipal-mail-thread";
 import { SendComplaintButton } from "@/components/dashboard/send-complaint-button";
+import { MessageCitizenForm } from "@/components/dashboard/message-citizen-form";
+import { getIssueContact } from "@/lib/issue-contact";
+import { createServiceRoleClient } from "@/lib/supabase/server";
 import { getMailForIssue } from "@/lib/municipal-mail";
 import { resolveMunicipalRecipient } from "@/lib/email/municipal";
 import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
@@ -67,6 +70,30 @@ export default async function IssueDetailPage({
         lng: issue.lng,
       })
     : null;
+
+  // Which channels the citizen can actually be reached on. Both live behind
+  // the service role — profiles.phone is withheld from the citizen column
+  // grant, and the email is in issue_contacts, which grants nothing at all.
+  const contactAdmin = isStaff ? createServiceRoleClient() : null;
+  const [reporterContact, reporterEmail] = contactAdmin
+    ? await Promise.all([
+        issue.reporter_id
+          ? contactAdmin
+              .from("profiles")
+              .select("phone, full_name")
+              .eq("id", issue.reporter_id)
+              .maybeSingle()
+              .then((r) => r.data)
+          : Promise.resolve(null),
+        getIssueContact(contactAdmin, issue.id),
+      ])
+    : [null, null];
+
+  const reporterName =
+    issue.reporter_name ??
+    (issue as { profiles?: { full_name: string | null } }).profiles?.full_name ??
+    reporterContact?.full_name ??
+    null;
 
   // Crews for this issue's department only. A crew with no department is not
   // "dispatchable anywhere" — the database trigger rejects it outright — so
@@ -125,10 +152,7 @@ export default async function IssueDetailPage({
           <span className="flex items-center gap-1.5">
             <User className="size-4" />
             Reported by{" "}
-            {issue.reporter_name ??
-              (issue as { profiles?: { full_name: string | null } }).profiles
-                ?.full_name ??
-              "a citizen"}{" "}
+            {reporterName ?? "a citizen"}{" "}
             ·{" "}
             {formatDistanceToNow(new Date(issue.created_at), {
               addSuffix: true,
@@ -175,6 +199,17 @@ export default async function IssueDetailPage({
             sentAt={issue.acknowledgement_sent_at}
           />
         </ConsolePanel>
+
+        {isStaff && (
+          <ConsolePanel title="Message the citizen">
+            <MessageCitizenForm
+              issueId={issue.id}
+              reporterName={reporterName}
+              hasPhone={Boolean(reporterContact?.phone)}
+              hasEmail={Boolean(reporterEmail)}
+            />
+          </ConsolePanel>
+        )}
 
         {isStaff && (
           <ConsolePanel title="Municipal correspondence">
