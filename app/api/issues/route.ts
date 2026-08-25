@@ -4,7 +4,7 @@ import { classifyIssuePhoto, rejectionFor } from "@/lib/ai/classify";
 import { reverseGeocode } from "@/lib/geo";
 import { sendEmail } from "@/lib/email/client";
 import { reportFiledEmail } from "@/lib/email/templates";
-import { sendMunicipalComplaint } from "@/lib/email/municipal";
+import { sendMunicipalComplaint, mayAutoSend } from "@/lib/email/municipal";
 import { saveIssueContact } from "@/lib/issue-contact";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { pushNearbyIssueAlerts } from "@/lib/push/fanout";
@@ -263,9 +263,12 @@ export async function POST(request: NextRequest) {
     if (!sent.ok) console.error("Failed to email the filed-report confirmation", sent.error);
   }
 
-  // Formal intimation to the municipal body. Only goes anywhere if a
-  // recipient has been configured — see municipalRecipient().
-  await sendMunicipalComplaint({
+  // The complaint to the municipal body waits for a person. Filing used to
+  // dispatch it immediately, which mailed a development authority about long
+  // grass and stray cattle minutes after a citizen photographed them — an
+  // officer approves it from the report instead. See mayAutoSend().
+  if (mayAutoSend(issue.ai_severity)) {
+    await sendMunicipalComplaint({
     data: {
       id: issue.id,
       reference: issue.reference ?? issue.id.slice(0, 8).toUpperCase(),
@@ -283,9 +286,10 @@ export async function POST(request: NextRequest) {
       reporterPhone: null,
       createdAt: issue.created_at,
     },
-    departmentEmail: departmentResult.data?.contact_email,
-    viewUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${issue.id}`,
-  }).catch((err) => console.error("Municipal complaint send threw", err));
+      departmentEmail: departmentResult.data?.contact_email,
+      viewUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/issues/${issue.id}`,
+    }).catch((err) => console.error("Municipal complaint send threw", err));
+  }
 
   return NextResponse.json({ issue }, { status: 201 });
 }

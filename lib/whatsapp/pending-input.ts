@@ -80,6 +80,30 @@ const ISSUE_WORDS = new Set([
   ...AMBIGUOUS_WORDS,
 ]);
 
+// Words a citizen types about the conversation rather than about themselves.
+//
+// The bot asks for a location and then for a name, so an answer arriving one
+// beat late -- or someone narrating what they are doing -- was filed as who
+// they are. One live report is addressed to "Location.", and the letter to the
+// nagar nigam would have named the complainant that.
+const NEVER_A_NAME = new Set([
+  "location", "locations", "address", "addresses", "map", "maps", "pin",
+  "gps", "live", "current", "share", "shared", "sharing", "send", "sent",
+  "sending", "photo", "photos", "picture", "pictures", "image", "images",
+  "pic", "pics", "camera", "gallery", "name", "myname", "attached",
+  "attach", "above", "below", "same", "done", "ready", "next", "wait",
+  "waiting", "checking", "check", "test", "testing", "unknown", "anonymous",
+  "citizen", "user", "admin",
+]);
+
+// Place-name tokens that are not obviously places on their own. Without these
+// "India Gate" is name-shaped, and a report went out under it.
+const PLACE_NAME_TOKENS = new Set([
+  "gate", "fort", "qila", "minar", "mahal", "bagh", "ganj", "sarai", "kunj",
+  "dham", "ghat", "haat", "more", "morh", "pul", "nala", "talab", "jheel",
+  "maidan", "ground", "stadium", "depot", "godown", "factory", "plant",
+]);
+
 const NAME_SHAPE_RE = /^[a-zA-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*(?:\s+[a-zA-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*){0,3}$/;
 
 // Openers that mark a message as a question or command rather than an
@@ -153,7 +177,12 @@ export function looksLikeBareName(text: string): boolean {
     .split(/\s+/)
     .some((raw) => {
       const word = raw.replace(/[.'-]/g, "");
-      return PLACE_WORDS.has(word) || ISSUE_WORDS.has(word);
+      return (
+        PLACE_WORDS.has(word) ||
+        ISSUE_WORDS.has(word) ||
+        PLACE_NAME_TOKENS.has(word) ||
+        NEVER_A_NAME.has(word)
+      );
     });
 }
 

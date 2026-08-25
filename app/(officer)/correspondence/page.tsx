@@ -3,7 +3,8 @@ import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { getCurrentProfile } from "@/lib/auth";
-import { getRecentMail } from "@/lib/municipal-mail";
+import { getRecentMail, getPendingComplaints } from "@/lib/municipal-mail";
+import { SendComplaintButton } from "@/components/dashboard/send-complaint-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -21,7 +22,8 @@ export default async function CorrespondencePage() {
   // `authenticated` — the check has to happen before the service-role read.
   if (profile?.role !== "admin") redirect("/dashboard");
 
-  const { mail, sent, received, repliedIssues } = await getRecentMail(150);
+  const [{ mail, sent, received, repliedIssues }, { pending, unroutable }] =
+    await Promise.all([getRecentMail(150), getPendingComplaints()]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,11 +35,79 @@ export default async function CorrespondencePage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Awaiting approval" value={pending.length} />
         <StatTile label="Complaints sent" value={sent} />
         <StatTile label="Replies received" value={received} />
         <StatTile label="Reports answered" value={repliedIssues} />
       </div>
+
+      {/* Nothing is emailed on filing. A complaint carries the operator's
+          name, so it waits here until a person decides it is worth an
+          office's attention. */}
+      <section className="flex flex-col gap-2">
+        <h2 className="font-mono text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+          Awaiting your approval
+        </h2>
+        {pending.length === 0 ? (
+          <Card>
+            <CardContent className="pt-6 text-sm text-muted-foreground">
+              Nothing waiting. Every open report has either been sent or has no
+              office covering its location.
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {unroutable > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {unroutable} of these fall outside every office&apos;s area, so
+                there is nowhere to send them until the directory covers that
+                place.
+              </p>
+            )}
+            <ol className="flex flex-col gap-2">
+              {pending.map((p) => (
+                <li key={p.issueId}>
+                  <Card>
+                    <CardContent className="flex flex-col gap-2 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant={p.severity >= 8 ? "destructive" : "secondary"}
+                        >
+                          {p.severityLabel} · {p.severity}/10
+                        </Badge>
+                        <Link
+                          href={`/dashboard/${p.issueId}`}
+                          className="font-mono text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                        >
+                          {p.reference ?? p.issueId.slice(0, 8).toUpperCase()}
+                        </Link>
+                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(p.createdAt), {
+                            addSuffix: true,
+                          })}
+                        </span>
+                      </div>
+                      <p className="text-sm font-medium">{p.title}</p>
+                      {p.address && (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {p.address}
+                        </p>
+                      )}
+                      <SendComplaintButton
+                        issueId={p.issueId}
+                        officeName={p.officeName}
+                        address={p.officeEmail}
+                        alreadySent={false}
+                      />
+                    </CardContent>
+                  </Card>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
+      </section>
 
       {mail.length === 0 ? (
         <Card>

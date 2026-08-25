@@ -226,6 +226,30 @@ export function municipalComplaintEmail(
   };
 }
 
+// Whether a freshly filed report may write to a municipal office without a
+// person seeing it first.
+//
+// Nothing does, by default. Automatic dispatch sent "Park Area Requires
+// Mowing" and "Stray Cows Grazing in Public Park" to a development authority
+// within minutes of filing, which is how a civic service turns into a source
+// of noise that gets its mail filtered. A complaint carries the operator's
+// name; it is theirs to approve.
+//
+// MUNICIPAL_AUTO_SEND_MIN_SEVERITY opts back in above a severity, for an
+// operator who decides a 10/10 road collapse should not wait for anyone.
+// Unset means every complaint waits.
+export function autoSendThreshold(): number | null {
+  const raw = process.env.MUNICIPAL_AUTO_SEND_MIN_SEVERITY?.trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 1 && n <= 10 ? n : null;
+}
+
+export function mayAutoSend(severity: number): boolean {
+  const threshold = autoSendThreshold();
+  return threshold !== null && severity >= threshold;
+}
+
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // Who the complaint is actually sent to, in priority order:

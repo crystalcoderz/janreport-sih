@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { haversineKm } from "@/lib/municipal-directory";
 
 // The record of what JanReport actually said to a municipal body, and what it
 // said back.
@@ -109,6 +110,110 @@ export async function getMailForIssue(issueId: string): Promise<MunicipalMail[]>
     return [];
   }
   return ((data ?? []) as Row[]).map(toMail);
+}
+
+export interface PendingComplaint {
+  issueId: string;
+  reference: string | null;
+  title: string;
+  severity: number;
+  severityLabel: string;
+  category: string;
+  address: string | null;
+  createdAt: string;
+  /** Where it would go, or null when no office covers the location. */
+  officeName: string | null;
+  officeEmail: string | null;
+}
+
+/**
+ * Open reports whose complaint has not been sent.
+ *
+ * This is the queue that exists because filing no longer dispatches anything
+ * by itself. Without somewhere to see it, "waiting for approval" and
+ * "forgotten" look identical.
+ *
+ * Offices are matched in memory against the directory rather than one query
+ * per report: the directory is a few rows and the queue is short, so a join
+ * would cost more than it saves.
+ */
+export async function getPendingComplaints(): Promise<{
+  pending: PendingComplaint[];
+  unroutable: number;
+}> {
+  const supabase = createServiceRoleClient();
+
+  const [issuesRes, sentRes, officesRes] = await Promise.all([
+    supabase
+      .from("issues")
+      .select(
+        "id, reference, title, ai_severity, ai_severity_label, ai_category, address, lat, lng, created_at"
+      )
+      .in("status", ["reported", "acknowledged", "in_progress"])
+      .order("ai_severity", { ascending: false }),
+    supabase.from("municipal_emails").select("issue_id").eq("direction", "outbound"),
+    supabase
+      .from("municipal_offices")
+      .select("name, contact_email, lat, lng, radius_km")
+      .eq("verified", true),
+  ]);
+
+  if (issuesRes.error) {
+    console.error("[municipal-mail] pending lookup failed", issuesRes.error);
+    return { pending: [], unroutable: 0 };
+  }
+
+  const alreadySent = new Set(
+    ((sentRes.data ?? []) as { issue_id: string }[]).map((r) => r.issue_id)
+  );
+  const offices = (officesRes.data ?? []) as {
+    name: string;
+    contact_email: string;
+    lat: number;
+    lng: number;
+    radius_km: number;
+  }[];
+
+  const pending: PendingComplaint[] = [];
+  let unroutable = 0;
+
+  for (const i of (issuesRes.data ?? []) as {
+    id: string;
+    reference: string | null;
+    title: string;
+    ai_severity: number;
+    ai_severity_label: string;
+    ai_category: string;
+    address: string | null;
+    lat: number;
+    lng: number;
+    created_at: string;
+  }[]) {
+    if (alreadySent.has(i.id)) continue;
+
+    let best: { name: string; email: string; d: number } | null = null;
+    for (const o of offices) {
+      const d = haversineKm(i.lat, i.lng, o.lat, o.lng);
+      if (d > o.radius_km) continue;
+      if (!best || d < best.d) best = { name: o.name, email: o.contact_email, d };
+    }
+    if (!best) unroutable++;
+
+    pending.push({
+      issueId: i.id,
+      reference: i.reference,
+      title: i.title,
+      severity: i.ai_severity,
+      severityLabel: i.ai_severity_label,
+      category: i.ai_category,
+      address: i.address,
+      createdAt: i.created_at,
+      officeName: best?.name ?? null,
+      officeEmail: best?.email ?? null,
+    });
+  }
+
+  return { pending, unroutable };
 }
 
 /** One message, with the report it belongs to. Null when it does not exist. */

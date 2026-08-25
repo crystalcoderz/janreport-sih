@@ -140,6 +140,28 @@ describe("resolvePendingReportInput", () => {
   });
 });
 
+describe("looksLikeBareName rejections", () => {
+  it("refuses an answer to the previous question", () => {
+    // The bot asks for a location, then for a name. "Location." arriving one
+    // beat late was filed as the citizen's name on a live report.
+    for (const t of ["Location.", "location", "my location", "photo", "map", "gps"]) {
+      expect(looksLikeBareName(t)).toBe(false);
+    }
+  });
+
+  it("refuses a landmark that is merely name-shaped", () => {
+    for (const t of ["India Gate", "INDIA GATE", "Red Fort", "Ramlila Maidan"]) {
+      expect(looksLikeBareName(t)).toBe(false);
+    }
+  });
+
+  it("still accepts an ordinary name", () => {
+    for (const t of ["Uday", "Arun Mehta", "Navish Bharti", "prayaas"]) {
+      expect(looksLikeBareName(t)).toBe(true);
+    }
+  });
+});
+
 describe("describesAnIssue", () => {
   it("recognises a description of the problem", () => {
     // These used to be handed to the geocoder as a bare answer and pinned as
