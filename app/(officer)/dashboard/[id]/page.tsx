@@ -179,7 +179,10 @@ export default async function IssueDetailPage({
         {isStaff && (
           <ConsolePanel title="Municipal correspondence">
             <div className="flex flex-col gap-4">
-              <MunicipalMailThread mail={municipalMail} />
+              <MunicipalMailThread
+                mail={municipalMail}
+                linkToDetail={profile?.role === "admin"}
+              />
               <SendComplaintButton
                 issueId={issue.id}
                 officeName={municipalRecipient?.office?.name ?? null}

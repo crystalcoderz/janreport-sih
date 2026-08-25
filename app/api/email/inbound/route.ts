@@ -219,6 +219,9 @@ export async function POST(request: NextRequest) {
       address: from,
       subject: subject || null,
       body: reply,
+      // The reply as the office actually formatted it, kept alongside the
+      // stripped plain text that gets relayed to the citizen.
+      bodyHtml: bodyHtml || null,
       providerMessageId: emailId || null,
     });
 

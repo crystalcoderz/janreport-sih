@@ -244,6 +244,7 @@ export interface Database {
           address: string;
           subject: string | null;
           body: string | null;
+          body_html: string | null;
           office_name: string | null;
           provider_message_id: string | null;
           created_at: string;
@@ -255,6 +256,7 @@ export interface Database {
           address: string;
           subject?: string | null;
           body?: string | null;
+          body_html?: string | null;
           office_name?: string | null;
           provider_message_id?: string | null;
           created_at?: string;

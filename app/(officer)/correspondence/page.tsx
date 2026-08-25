@@ -78,7 +78,12 @@ export default async function CorrespondencePage() {
                       </span>
                     </div>
 
-                    {m.subject && <p className="text-sm">{m.subject}</p>}
+                    <Link
+                      href={`/correspondence/${m.id}`}
+                      className="text-sm underline-offset-2 hover:underline"
+                    >
+                      {m.subject ?? (outbound ? "Complaint" : "Reply")}
+                    </Link>
 
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Link

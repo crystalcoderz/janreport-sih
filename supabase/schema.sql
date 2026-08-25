@@ -234,6 +234,10 @@ create table municipal_emails (
   address             text not null,
   subject             text,
   body                text,
+  -- The message as it was actually sent or received, kept rather than
+  -- re-rendered later so the record cannot drift away from what the office
+  -- really got when the template changes.
+  body_html           text,
   office_name         text,
   provider_message_id text,
   created_at          timestamptz not null default now()

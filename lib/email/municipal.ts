@@ -315,6 +315,7 @@ export async function sendMunicipalComplaint(params: {
     address: to,
     subject: mail.subject,
     body: mail.text,
+    bodyHtml: mail.html,
     officeName: recipient.office?.name ?? office?.name ?? null,
     providerMessageId: res.id ?? null,
   });

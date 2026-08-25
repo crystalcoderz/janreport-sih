@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import type { MunicipalMail } from "@/lib/municipal-mail";
@@ -14,7 +15,14 @@ function formatWhen(iso: string): string {
   }).format(new Date(iso));
 }
 
-export function MunicipalMailThread({ mail }: { mail: MunicipalMail[] }) {
+export function MunicipalMailThread({
+  mail,
+  linkToDetail = false,
+}: {
+  mail: MunicipalMail[];
+  /** Only admins can open the full-letter page, so only they get the link. */
+  linkToDetail?: boolean;
+}) {
   if (mail.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -69,6 +77,15 @@ export function MunicipalMailThread({ mail }: { mail: MunicipalMail[] }) {
 
             {m.subject && (
               <p className="mt-1.5 text-sm text-foreground/90">{m.subject}</p>
+            )}
+
+            {linkToDetail && (
+              <Link
+                href={`/correspondence/${m.id}`}
+                className="mt-1.5 inline-block text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground"
+              >
+                {outbound ? "Open the letter as it was sent" : "Open the reply as it arrived"}
+              </Link>
             )}
 
             {m.body && (
