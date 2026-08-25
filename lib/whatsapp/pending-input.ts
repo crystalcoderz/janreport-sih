@@ -36,7 +36,12 @@ const PLACE_WORDS = new Set([
 // and name-shaped: the issue itself. Without this, "big pothole here" and
 // "garbage" get filed as who they are, and the acknowledgement letter goes
 // out addressed "Dear big pothole here,".
-const ISSUE_WORDS = new Set([
+//
+// Split in two because the halves behave differently. The thing being
+// complained about. These DO occur in genuine place names —
+// Water Tank Road, Signal Colony, Fire Brigade Chowk, Light House Road — so a
+// noun on its own says nothing until you look at what surrounds it.
+const ISSUE_NOUN_WORDS = new Set([
   "pothole", "potholes", "hole", "holes", "garbage", "trash", "waste",
   "rubbish", "dump", "dumping", "kachra", "water", "sewage", "sewer",
   "drain", "drainage", "nali", "leak", "leaking", "leakage", "light",
@@ -45,17 +50,34 @@ const ISSUE_WORDS = new Set([
   "branch", "dog", "dogs", "stray", "cattle", "toilet", "manhole",
   "footpath", "pavement", "signal", "sign", "bin", "dustbin", "smell",
   "smoke", "fire", "traffic", "parking", "encroachment",
-  // condition and urgency words that pad those out into a phrase
+]);
+
+// Condition, urgency and complaint words. Nobody names a street "Not Working"
+// or "Overflowing", so one of these is on its own enough to call a message a
+// description of a problem rather than an address.
+const ISSUE_CONDITION_WORDS = new Set([
   "broken", "damaged", "blocked", "clogged", "overflow", "overflowing",
-  "cracked", "missing", "dirty", "filthy", "stinking", "smelly", "open",
+  "cracked", "missing", "dirty", "filthy", "stinking", "smelly",
   "fallen", "burnt", "dead", "dangerous", "unsafe", "urgent", "emergency",
   "big", "large", "small", "deep", "huge", "many", "lot", "lots", "very",
   "not", "working", "since", "days", "weeks", "months", "everyday",
   "daily", "again", "still",
-  // generic filler
-  "here", "there", "everywhere", "issue", "issues", "problem", "problems",
-  "complaint", "report", "repair", "fix", "please", "help", "area",
-  "place", "side", "kindly", "sir", "madam",
+  "everywhere", "issue", "issues", "problem", "problems",
+  "complaint", "report", "repair", "fix", "please", "help",
+  "kindly", "sir", "madam",
+]);
+
+// Padding that reads as a complaint but is also ordinary in an address
+// ("Connaught Place", "Civil Lines area", "is se side"), so it decides
+// nothing on its own.
+const AMBIGUOUS_WORDS = new Set(["open", "here", "there", "area", "place", "side"]);
+
+// The union, unchanged in membership from when this was one flat list —
+// looksLikeLocationPhrase and looksLikeBareName still want the whole set.
+const ISSUE_WORDS = new Set([
+  ...ISSUE_NOUN_WORDS,
+  ...ISSUE_CONDITION_WORDS,
+  ...AMBIGUOUS_WORDS,
 ]);
 
 const NAME_SHAPE_RE = /^[a-zA-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*(?:\s+[a-zA-Zऀ-ॿ][a-zA-Zऀ-ॿ.'-]*){0,3}$/;
@@ -96,19 +118,31 @@ export function looksLikeLocationPhrase(text: string): boolean {
   return normalized.some((w) => PLACE_WORDS.has(w)) || /\d/.test(trimmed);
 }
 
-// True when the message names a civic problem rather than a place.
+// True when the message describes a civic problem rather than naming a place.
 //
 // The geocoder is country-biased and answers almost anything: "big pothole"
 // and "garbage" both return a confident hit somewhere in India. A bare answer
 // skips the looksLikeLocationPhrase gate above, so without this a citizen
 // describing the problem had that description silently pinned as the report's
 // location -- and the photo then belonged to a spot they never named.
-export function containsIssueWord(text: string): boolean {
-  return text
+//
+// Refusing on any problem word alone was too blunt: Water Tank Road, Signal
+// Colony and Fire Brigade Chowk are real addresses. So a condition word
+// decides on its own, while a problem noun only counts when nothing anchors
+// the message to a place.
+export function describesAnIssue(text: string): boolean {
+  const words = text
     .trim()
     .split(/\s+/)
-    .map((w) => w.toLowerCase().replace(/[^a-z0-9ऀ-ॿ]/g, ""))
-    .some((w) => ISSUE_WORDS.has(w));
+    .map((w) => w.toLowerCase().replace(/[^a-z0-9ऀ-ॿ]/g, ""));
+
+  if (words.some((w) => ISSUE_CONDITION_WORDS.has(w))) return true;
+  if (!words.some((w) => ISSUE_NOUN_WORDS.has(w))) return false;
+
+  // A problem noun with a place word or a number beside it is an address:
+  // "water tank road", "sector 5 drain". Without either, it is a complaint.
+  const anchored = words.some((w) => PLACE_WORDS.has(w)) || /\d/.test(text);
+  return !anchored;
 }
 
 export function looksLikeBareName(text: string): boolean {
@@ -160,7 +194,7 @@ export async function resolvePendingReportInput(params: {
   // Never geocode a description of the problem. looksLikeLocationPhrase
   // already refuses these, but a short message reaches here as a `bare`
   // answer without ever passing through it.
-  if (!params.hasLocation && !containsIssueWord(text)) {
+  if (!params.hasLocation && !describesAnIssue(text)) {
     const geocoded = await forwardGeocode(text);
     // A bare "locality" is only trusted once the name is on file, since a
     // country-biased search also fuzzy-matches names onto towns ("deepak"

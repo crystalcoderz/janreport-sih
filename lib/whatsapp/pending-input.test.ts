@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { looksLikeBareName, resolvePendingReportInput, containsIssueWord } from "@/lib/whatsapp/pending-input";
+import { looksLikeBareName, resolvePendingReportInput, describesAnIssue } from "@/lib/whatsapp/pending-input";
 import { forwardGeocode } from "@/lib/geo";
 
 // Must be vi.mock, not vi.spyOn: pending-input.ts imports forwardGeocode
@@ -140,18 +140,45 @@ describe("resolvePendingReportInput", () => {
   });
 });
 
-describe("containsIssueWord", () => {
+describe("describesAnIssue", () => {
   it("recognises a description of the problem", () => {
     // These used to be handed to the geocoder as a bare answer and pinned as
     // the report's location.
     for (const t of ["big pothole", "garbage", "street light not working", "open manhole"]) {
-      expect(containsIssueWord(t)).toBe(true);
+      expect(describesAnIssue(t)).toBe(true);
     }
   });
 
   it("leaves real places alone", () => {
     for (const t of ["sector 62 noida", "iilm university", "gomti nagar", "pari chowk"]) {
-      expect(containsIssueWord(t)).toBe(false);
+      expect(describesAnIssue(t)).toBe(false);
+    }
+  });
+
+  it("does not mistake a place name that contains a problem word", () => {
+    // These are genuine Indian addresses. Refusing to geocode them sent the
+    // citizen back round the loop for a location they had already given.
+    for (const t of [
+      "water tank road",
+      "signal colony",
+      "fire brigade chowk",
+      "light house road",
+      "tree park",
+      "pole bazaar",
+    ]) {
+      expect(describesAnIssue(t)).toBe(false);
+    }
+  });
+
+  it("still refuses a description that happens to name a place word", () => {
+    // A condition word settles it on its own, whatever else is in the message.
+    for (const t of [
+      "street light not working",
+      "drain blocked near market",
+      "garbage everywhere",
+      "broken footpath",
+    ]) {
+      expect(describesAnIssue(t)).toBe(true);
     }
   });
 });
