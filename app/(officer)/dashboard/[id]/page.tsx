@@ -12,7 +12,9 @@ import { SendAcknowledgementButton } from "@/components/dashboard/send-acknowled
 import { IssueLocationMap } from "@/components/map/issue-location-map";
 import { IssueTimeline } from "@/components/issue/issue-timeline";
 import { MunicipalMailThread } from "@/components/dashboard/municipal-mail-thread";
+import { SendComplaintButton } from "@/components/dashboard/send-complaint-button";
 import { getMailForIssue } from "@/lib/municipal-mail";
+import { resolveMunicipalRecipient } from "@/lib/email/municipal";
 import { ResolutionVerdictPanel } from "@/components/issue/resolution-verdict";
 import { IssueComments } from "@/components/issue/issue-comments";
 import { ConsolePanel } from "@/components/dashboard/console-panel";
@@ -54,10 +56,17 @@ export default async function IssueDetailPage({
   // Read with the service role, so it is fetched only after the officer layout
   // has established who is asking. municipal_emails grants nothing to
   // `authenticated` -- it holds the office's address and its reply verbatim.
-  const municipalMail =
-    profile?.role === "officer" || profile?.role === "admin"
-      ? await getMailForIssue(issue.id)
-      : [];
+  const isStaff = profile?.role === "officer" || profile?.role === "admin";
+  const municipalMail = isStaff ? await getMailForIssue(issue.id) : [];
+  // Resolved here so the officer can see which body it would reach before
+  // committing to send, rather than finding out from a toast afterwards.
+  const municipalRecipient = isStaff
+    ? await resolveMunicipalRecipient({
+        departmentEmail: null,
+        lat: issue.lat,
+        lng: issue.lng,
+      })
+    : null;
 
   // Crews for this issue's department only. A crew with no department is not
   // "dispatchable anywhere" — the database trigger rejects it outright — so
@@ -167,6 +176,20 @@ export default async function IssueDetailPage({
           />
         </ConsolePanel>
 
+        {isStaff && (
+          <ConsolePanel title="Municipal correspondence">
+            <div className="flex flex-col gap-4">
+              <MunicipalMailThread mail={municipalMail} />
+              <SendComplaintButton
+                issueId={issue.id}
+                officeName={municipalRecipient?.office?.name ?? null}
+                address={municipalRecipient?.email ?? null}
+                alreadySent={municipalMail.some((m) => m.direction === "outbound")}
+              />
+            </div>
+          </ConsolePanel>
+        )}
+
         <ConsolePanel title="Assigned crew">
           <AssignTeamForm
             issueId={issue.id}
@@ -181,12 +204,6 @@ export default async function IssueDetailPage({
         <ConsolePanel title="Update status">
           <StatusUpdateForm issueId={issue.id} currentStatus={issue.status} />
         </ConsolePanel>
-
-        {(profile?.role === "officer" || profile?.role === "admin") && (
-          <ConsolePanel title="Municipal correspondence">
-            <MunicipalMailThread mail={municipalMail} />
-          </ConsolePanel>
-        )}
 
         <ConsolePanel title="Timeline">
           <IssueTimeline
