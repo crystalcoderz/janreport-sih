@@ -7,6 +7,7 @@ import { statusChangedEmail, resolvedEmail } from "@/lib/email/templates";
 import { CATEGORY_LABELS, type IssueCategory } from "@/lib/departments";
 import { sendWhatsAppText, isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { isAllowedPhotoUrl } from "@/lib/storage";
+import { isAllowedTransition } from "@/lib/issue-status";
 import type { IssueStatus, ResolutionVerdict } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -68,19 +69,10 @@ export async function PATCH(
   // is still recorded below; only the side effects are gated on an actual move.
   const isTransition = status !== previousStatus;
 
-  // Legal moves. Absent this, an officer (or a crafted request) could send a
-  // resolved report back to "reported", or resolve something twice and notify
-  // the citizen twice. Resolved and rejected are terminal — reopening is a
-  // deliberate act that this endpoint does not model.
-  const ALLOWED_NEXT: Record<IssueStatus, IssueStatus[]> = {
-    reported: ["acknowledged", "in_progress", "rejected"],
-    acknowledged: ["in_progress", "resolved", "rejected"],
-    in_progress: ["resolved", "rejected"],
-    resolved: [],
-    rejected: [],
-  };
-
-  if (isTransition && !ALLOWED_NEXT[previousStatus].includes(status)) {
+  // Legal moves live in lib/issue-status.ts so the officer's dropdown offers
+  // exactly what this check accepts. My first version of this table refused
+  // reported -> resolved, which is the commonest action there is.
+  if (isTransition && !isAllowedTransition(previousStatus, status)) {
     return NextResponse.json(
       {
         error: `Cannot move a ${previousStatus.replace("_", " ")} report to ${status.replace(
@@ -123,8 +115,19 @@ export async function PATCH(
   // citizen's original report. Best-effort — the status change already
   // succeeded above, and a verification failure must never undo it or
   // fail the request. A null verdict simply reads as "not verified".
+  // Proof arriving after the resolve is a real sequence: an officer marks the
+  // job done, then comes back with the photo. Gating purely on isTransition
+  // stored that photo and then did nothing with it -- no AI verification, and
+  // the citizen never told. So a first-time proof photo counts as an event in
+  // its own right.
+  const proofJustArrived =
+    status === "resolved" &&
+    Boolean(resolutionPhotoUrl) &&
+    !issue.resolution_verified_at;
+  const notify = isTransition || proofJustArrived;
+
   let verified = issue;
-  if (isTransition && status === "resolved" && issue.resolution_photo_url && issue.photo_url) {
+  if (notify && status === "resolved" && issue.resolution_photo_url && issue.photo_url) {
     try {
       const result = await verifyResolution({
         beforeUrl: issue.photo_url,
@@ -165,7 +168,10 @@ export async function PATCH(
   // arriving first and contradicting it. Best-effort: the status change has
   // already succeeded and must not be undone by a mail failure. Skipped
   // entirely when the status did not actually move — see isTransition.
-  if (isTransition && reporterEmail) {
+  // A note recorded without a status change is still news the citizen wants;
+  // what must not repeat is the resolution email itself, which `notify` and
+  // the template choice below already handle.
+  if ((notify || Boolean(note)) && reporterEmail) {
     try {
       const data = {
         id: verified.id,
@@ -190,8 +196,11 @@ export async function PATCH(
       // citizen was told "Photo inconclusive" about a photo that was never
       // submitted. A resolution without proof gets the plain notice instead —
       // same "Resolved — <title>" subject, no invented finding.
+      // `notify`, not just the status: a note added to an already-resolved
+      // report must not re-send the resolution announcement. It gets the plain
+      // status notice instead, which is what the note actually is.
       const mail =
-        status === "resolved" && verified.resolution_photo_url
+        notify && status === "resolved" && verified.resolution_photo_url
           ? resolvedEmail(
               data,
               {
@@ -211,7 +220,7 @@ export async function PATCH(
     }
   }
 
-  if (isTransition && status === "resolved" && isWhatsAppConfigured()) {
+  if (notify && status === "resolved" && isWhatsAppConfigured()) {
     // Best-effort, never blocks the response — the status update (and the
     // verdict above) already succeeded regardless of whether this send works.
     notifyReporterOnWhatsApp(verified).catch((err) => {

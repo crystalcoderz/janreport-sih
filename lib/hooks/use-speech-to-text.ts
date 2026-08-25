@@ -57,6 +57,10 @@ export function useSpeechToText(options?: { onEnd?: (transcript: string) => void
   // setState is async and `onend` fires outside React's batching, so the
   // handler reads the transcript from a ref rather than stale state.
   const transcriptRef = useRef("");
+  // The hand-back, kept so stop() can run it immediately instead of waiting on
+  // the engine. Clearing the transcript makes it idempotent, so the onend that
+  // follows a manual stop is a harmless no-op.
+  const finishRef = useRef<(() => void) | null>(null);
   // useSyncExternalStore (not useState+useEffect) so the browser-only
   // feature check never causes a hydration mismatch: SSR always reports
   // unsupported, and the client snapshot is read synchronously on mount.
@@ -103,6 +107,7 @@ export function useSpeechToText(options?: { onEnd?: (transcript: string) => void
     };
     recognition.onerror = finish;
     recognition.onend = finish;
+    finishRef.current = finish;
 
     recognitionRef.current = recognition;
     transcriptRef.current = "";
@@ -111,10 +116,13 @@ export function useSpeechToText(options?: { onEnd?: (transcript: string) => void
     setListening(true);
   }, []);
 
-  // stop() only asks the engine to stop; `onend` is what actually fires, and
-  // that is where the transcript is handed over.
+  // Asks the engine to stop AND hands the transcript back straight away.
+  // Waiting for onend alone left the button showing "listening" if the engine
+  // never fired it, and lost anything dictated if the citizen submitted the
+  // report in the gap between the two.
   const stop = useCallback(() => {
     recognitionRef.current?.stop();
+    finishRef.current?.();
   }, []);
 
   const reset = useCallback(() => {

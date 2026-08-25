@@ -215,6 +215,32 @@ create index municipal_offices_verified_idx on municipal_offices (verified);
 alter table municipal_offices enable row level security;
 revoke all on municipal_offices from anon, authenticated;
 
+-- Short-term memory for the WhatsApp bot: the recent exchange for one number.
+--
+-- Every message used to be handled in isolation -- the agent saw the current
+-- text and nothing else -- so a citizen who asked to see their reports, got a
+-- list back and answered "Today one" was sending a fragment into a void. With
+-- nothing to answer, the model introduced itself instead, which reads as the
+-- bot forgetting the conversation mid-sentence.
+--
+-- Read back only within a short window: an answer to a question asked
+-- yesterday is not context, it is confusion. Pruned on write, cleared when the
+-- citizen cancels. No policies and no grants; service role only.
+create table whatsapp_conversation_turns (
+  id         bigserial primary key,
+  phone      text not null,
+  role       text not null check (role in ('user','assistant')),
+  content    text not null,
+  created_at timestamptz not null default now()
+);
+
+create index whatsapp_conversation_turns_phone_time_idx
+  on whatsapp_conversation_turns (phone, created_at desc);
+
+alter table whatsapp_conversation_turns enable row level security;
+revoke all on whatsapp_conversation_turns from anon, authenticated;
+revoke all on sequence whatsapp_conversation_turns_id_seq from anon, authenticated;
+
 -- One row per classification attempt on the public report endpoint.
 --
 -- The rate limit used to count rows in `issues`, which missed the only
@@ -1061,7 +1087,10 @@ create policy "issue_volunteer_offers_insert_own" on issue_volunteer_offers
 -- Accepting an offer is an officer's call. Letting the offerer write any
 -- status meant a citizen could mark their own offer accepted and then
 -- completed, and it would show on the officer's dashboard as approved
--- work nobody approved. The offerer may only withdraw.
+-- work nobody approved. The offerer may only withdraw -- or offer again,
+-- since withdrawing sets a status rather than deleting the row, and without
+-- 'offered' here a citizen who withdrew once could never volunteer for that
+-- issue again. 'accepted' and 'completed' remain an officer's to write.
 create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volunteer_offers
   for update to authenticated using (
     offered_by = auth.uid()
@@ -1074,7 +1103,7 @@ create policy "issue_volunteer_offers_update_own_or_officer_admin" on issue_volu
       select 1 from profiles p
       where p.id = auth.uid() and p.role in ('officer', 'admin')
     )
-    or (offered_by = auth.uid() and status = 'withdrawn')
+    or (offered_by = auth.uid() and status in ('withdrawn', 'offered'))
   );
 
 -- push_subscriptions: a citizen manages only their own devices. Fan-out

@@ -35,6 +35,12 @@ import { sendMunicipalComplaint } from "@/lib/email/municipal";
 import { isLinkRequest } from "@/lib/whatsapp/link-request";
 import { isCancelRequest } from "@/lib/whatsapp/cancel-request";
 import { resolvePendingReportInput } from "@/lib/whatsapp/pending-input";
+import {
+  loadRecentTurns,
+  recordTurn,
+  clearConversation,
+  pruneConversation,
+} from "@/lib/whatsapp/conversation";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { createWhatsAppSessionLink } from "@/lib/whatsapp/session-link";
 import { transcribeAudio } from "@/lib/ai/transcribe";
@@ -346,6 +352,10 @@ async function handleCancelRequest(phone: string, hasReportInProgress: boolean):
     return;
   }
   await clearReportSession(phone);
+  // Forget the exchange too. "Cancel" means the citizen has moved on, and
+  // carrying the questions that led here into the next conversation would
+  // have the bot answering something they have abandoned.
+  await clearConversation(phone);
   await sendWhatsAppText(phone, "No problem — I've cleared that. Send a new photo whenever you're ready.");
 }
 
@@ -898,9 +908,14 @@ async function handleMessage(message: WhatsAppMessage) {
       toolResults = [];
     } else {
       const agentStart = Date.now();
+      // The recent exchange, so a follow-up means something. Without it "Yes"
+      // and "Today one" arrived as isolated fragments and the model, having
+      // nothing to answer, introduced itself instead.
+      const history = await loadRecentTurns(phone);
       ({ reply, toolResults } = await runKimiAgent(
         SYSTEM_PROMPT,
         [
+          ...history.map((t) => ({ role: t.role, content: t.content }) as const),
           { role: "user", content: contextNote },
           { role: "user", content: userText },
         ],
@@ -952,6 +967,14 @@ async function handleMessage(message: WhatsAppMessage) {
     ]);
 
     const replyText = reply.trim() || "Got it.";
+
+    // Remembered before sending, so a delivery failure still leaves the
+    // conversation coherent on the next message. contextNote is deliberately
+    // not stored: it describes the state at this instant and would be stale
+    // and misleading a turn later.
+    await recordTurn(phone, "user", userText);
+    await recordTurn(phone, "assistant", replyText);
+    await pruneConversation(phone);
 
     // On a greeting, attach the quick-report buttons to the reply so the
     // citizen can start a report in one tap instead of composing a message.

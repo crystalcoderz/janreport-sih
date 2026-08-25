@@ -16,14 +16,15 @@ import type { IssueStatus } from "@/lib/supabase/types";
 import { toast } from "sonner";
 import { downscaleImage } from "@/lib/image-resize";
 import { Sparkles } from "lucide-react";
+import { selectableStatuses } from "@/lib/issue-status";
 
-const STATUS_OPTIONS: { value: IssueStatus; label: string }[] = [
-  { value: "reported", label: "Reported" },
-  { value: "acknowledged", label: "Acknowledged" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "resolved", label: "Resolved" },
-  { value: "rejected", label: "Rejected" },
-];
+const STATUS_LABELS: Record<IssueStatus, string> = {
+  reported: "Reported",
+  acknowledged: "Acknowledged",
+  in_progress: "In Progress",
+  resolved: "Resolved",
+  rejected: "Rejected",
+};
 
 export function StatusUpdateForm({
   issueId,
@@ -116,14 +117,16 @@ export function StatusUpdateForm({
         <Label>Status</Label>
         <Select value={status} onValueChange={(v) => setStatus(v as IssueStatus)}>
           <SelectTrigger>
-            <SelectValue>
-              {(v) => STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v}
-            </SelectValue>
+            <SelectValue>{(v) => STATUS_LABELS[v as IssueStatus] ?? v}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {STATUS_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
+            {/* Only moves the API will accept, plus the current status so an
+                officer can leave it alone and just add a note. Offering the
+                full list meant the commonest action answered 409 -- after the
+                browser had already uploaded the proof photo. */}
+            {selectableStatuses(currentStatus).map((value) => (
+              <SelectItem key={value} value={value}>
+                {STATUS_LABELS[value]}
               </SelectItem>
             ))}
           </SelectContent>

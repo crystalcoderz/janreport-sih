@@ -234,6 +234,29 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["municipal_offices"]["Insert"]>;
         Relationships: [];
       };
+      // Short-term memory for the WhatsApp bot: the recent exchange for one
+      // number, so a follow-up like "Yes" or "Today one" has something to
+      // refer to. See lib/whatsapp/conversation.ts.
+      whatsapp_conversation_turns: {
+        Row: {
+          id: number;
+          phone: string;
+          role: "user" | "assistant";
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          phone: string;
+          role: "user" | "assistant";
+          content: string;
+          created_at?: string;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["whatsapp_conversation_turns"]["Insert"]
+        >;
+        Relationships: [];
+      };
       // One row per classification attempt, so the rate limit can see the
       // requests that cost a Gemini call without writing an issue.
       report_attempts: {
